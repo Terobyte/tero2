@@ -167,6 +167,7 @@ async def execute_escalation(
             stuck_result=_sr,
             escalation_history=escalation_history or [],
         )
+        state.escalation_level = EscalationLevel.HUMAN.value
         state = checkpoint.mark_paused(state, "stuck — waiting for human input")
         await notifier.notify(
             "🛑 Stuck — waiting for human input (edit STEER.md to resume)",

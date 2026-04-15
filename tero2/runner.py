@@ -138,9 +138,9 @@ class Runner:
                         escalation_history=self._escalation_history,
                     )
                     self._current_state = state
+                    self._escalation_level = action.level
                     if action.should_pause:
                         return  # Level 3: paused, waiting for human
-                    self._escalation_level = action.level
                     if action.level == EscalationLevel.DIVERSIFICATION:
                         self._div_steps += 1
                     elif action.level == EscalationLevel.BACKTRACK_COACH:
@@ -277,10 +277,14 @@ class Runner:
                         state_ref[0] = state
                         self._current_state = state
                         if msg_type == "tool_result":
+                            mid_stuck = check_stuck(state, self.config.stuck_detection)
+                            if mid_stuck.signal == StuckSignal.STEP_LIMIT:
+                                log.warning("STEP_LIMIT reached — aborting attempt")
+                                return False, "\n".join(captured_parts)
+                            # Hard cap from retry config (fallback when retry limit < stuck limit)
                             if state.steps_in_task >= self.checkpoint.max_steps_per_task:
                                 log.warning("STEP_LIMIT reached — aborting attempt")
                                 return False, "\n".join(captured_parts)
-                            mid_stuck = check_stuck(state, self.config.stuck_detection)
                             if mid_stuck.signal == StuckSignal.TOOL_REPEAT:
                                 log.warning("TOOL_REPEAT detected — aborting attempt")
                                 return False, "\n".join(captured_parts)
