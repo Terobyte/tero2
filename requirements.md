@@ -978,7 +978,7 @@ Expected: PASS
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/ -v`
 Expected: All PASS
 
-- [x] **Step 7: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add tero2/runner.py tero2/reflexion.py tests/test_runner_reflexion.py

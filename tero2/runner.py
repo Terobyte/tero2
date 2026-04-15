@@ -27,7 +27,7 @@ from tero2.lock import FileLock
 from tero2.notifier import Notifier, NotifyLevel
 from tero2.providers.chain import ProviderChain
 from tero2.providers.registry import create_provider
-from tero2.reflexion import ReflexionContext, add_attempt
+from tero2.reflexion import MAX_BUILDER_OUTPUT_CHARS, ReflexionContext, add_attempt
 from tero2.state import AgentState, Phase
 from tero2.stuck_detection import StuckSignal, check_stuck, update_tool_hash
 
@@ -199,9 +199,15 @@ class Runner:
                 return
 
             # ── MVP1: record failure in reflexion context ──
+            # Truncate before storing so retry prompts don't bloat.
+            truncated_output = (
+                captured_output[:MAX_BUILDER_OUTPUT_CHARS] + "... [truncated]"
+                if len(captured_output) > MAX_BUILDER_OUTPUT_CHARS
+                else captured_output
+            )
             reflexion_ctx = add_attempt(
                 reflexion_ctx,
-                builder_output=captured_output,
+                builder_output=truncated_output,
                 verifier_feedback=f"Attempt {attempt + 1} did not succeed (no explicit verifier)",
             )
 
@@ -280,12 +286,21 @@ class Runner:
             timeout_s = timeout.timeout_s if timeout else HARD_TIMEOUT_S
             async with asyncio.timeout(timeout_s):
                 async for message in chain.run_prompt(plan_content):
-                    # Capture text content for reflexion
-                    text_content = (
-                        getattr(message, "text", None)
-                        or (message.get("text") if isinstance(message, dict) else None)
-                        or ""
-                    )
+                    # Capture text content for reflexion.
+                    # Handles three provider output shapes:
+                    #   1. plain str  (e.g. ShellProvider yields decoded stdout)
+                    #   2. dict       (keys "text" or "content")
+                    #   3. object     (attrs .text or .content)
+                    if isinstance(message, str):
+                        text_content = message
+                    elif isinstance(message, dict):
+                        text_content = message.get("text") or message.get("content") or ""
+                    else:
+                        text_content = (
+                            getattr(message, "text", None)
+                            or getattr(message, "content", None)
+                            or ""
+                        )
                     if text_content:
                         captured_parts.append(text_content)
 

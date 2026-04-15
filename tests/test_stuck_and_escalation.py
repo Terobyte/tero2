@@ -624,3 +624,98 @@ class TestRunnerStuckEscalation:
         report = disk.read_file("human/STUCK_REPORT.md")
         assert report, "STUCK_REPORT.md must be written when Level 3 is reached"
         assert "Stuck Report" in report
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Part 5: Runner — mid-step stuck detection + per-attempt signal check
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestRunnerMidStepStuckDetection:
+    """_run_agent detects TOOL_REPEAT mid-step; per-attempt boundary check fires on each retry."""
+
+    async def test_tool_repeat_mid_step_aborts_run_agent(self, tmp_path: Path) -> None:
+        """Two identical tool_result messages mid-step → _run_agent returns False before turn_end."""
+        project, plan, config, disk = _make_project(tmp_path)
+        # Default config has tool_repeat_threshold=2 — two identical calls trigger TOOL_REPEAT
+
+        runner = Runner(project, plan, config=config)
+        runner.notifier.notify = _noop_notify  # type: ignore[method-assign]
+
+        same_msg = {"type": "tool_result", "content": "same-repeated-action"}
+
+        class _RepeatToolChain:
+            current_provider_index = 0
+
+            async def run_prompt(self, prompt: str):
+                yield same_msg  # first occurrence — hash stored, no repeat yet
+                yield same_msg  # second occurrence — TOOL_REPEAT detected → abort
+                yield {"type": "turn_end"}  # never reached if abort works correctly
+
+        state = AgentState(phase=Phase.RUNNING)
+        success, _ = await runner._run_agent(_RepeatToolChain(), "plan", state)
+
+        # Mid-step TOOL_REPEAT must abort the attempt before reaching turn_end
+        assert not success, "Expected _run_agent to return False on mid-step TOOL_REPEAT"
+
+    async def test_tool_repeat_mid_step_increments_repeat_count(self, tmp_path: Path) -> None:
+        """After mid-step TOOL_REPEAT abort, state.tool_repeat_count reflects the repeated call."""
+        project, plan, config, disk = _make_project(tmp_path)
+
+        runner = Runner(project, plan, config=config)
+        runner.notifier.notify = _noop_notify  # type: ignore[method-assign]
+
+        same_msg = {"type": "tool_result", "content": "repeated-tool-call"}
+
+        class _RepeatToolChain:
+            current_provider_index = 0
+
+            async def run_prompt(self, prompt: str):
+                yield same_msg
+                yield same_msg
+
+        state = AgentState(phase=Phase.RUNNING)
+        await runner._run_agent(_RepeatToolChain(), "plan", state)
+        assert state.tool_repeat_count >= 1, (
+            f"Expected tool_repeat_count >= 1 after mid-step TOOL_REPEAT, "
+            f"got {state.tool_repeat_count}"
+        )
+
+    async def test_check_stuck_called_at_attempt_boundary(self, tmp_path: Path) -> None:
+        """Per-attempt boundary: check_stuck fires on attempt > 0 for each retry."""
+        project, plan, config, disk = _make_project(tmp_path)
+        config.retry.max_retries = 3
+        config.retry.chain_retry_wait_s = 0
+        # High stuck threshold so in-loop checks return NONE (no early escalation)
+        config.stuck_detection = StuckDetectionConfig(
+            max_retries=10,
+            max_steps_per_task=15,
+            tool_repeat_threshold=2,
+        )
+
+        boundary_retry_counts: list[int] = []
+
+        def tracking_check(state, cfg):
+            boundary_retry_counts.append(state.retry_count)
+            return check_stuck(state, cfg)
+
+        runner = Runner(project, plan, config=config)
+        runner.notifier.notify = _noop_notify  # type: ignore[method-assign]
+
+        with (
+            patch.object(runner, "_build_chain", return_value=_AlwaysFailChain()),
+            patch("tero2.runner.check_stuck", tracking_check),
+        ):
+            await runner.run()
+
+        # check_stuck called at each attempt boundary (attempt > 0) plus post-loop
+        # With max_retries=3: retry_counts seen are [1, 2, 3]
+        assert len(boundary_retry_counts) >= 2, (
+            f"Expected per-attempt stuck checks on retries after attempt 0, "
+            f"got {len(boundary_retry_counts)}: retry_counts={boundary_retry_counts}"
+        )
+        # All boundary calls see retry_count > 0 — check_stuck never fires at attempt 0
+        assert all(rc > 0 for rc in boundary_retry_counts), (
+            f"check_stuck fired at attempt 0 (retry_count=0), "
+            f"but it must only fire at attempt > 0: {boundary_retry_counts}"
+        )

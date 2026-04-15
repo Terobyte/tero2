@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-_MAX_BUILDER_OUTPUT_CHARS = 2000
+MAX_BUILDER_OUTPUT_CHARS = 2000
 
 
 @dataclass
@@ -73,8 +73,8 @@ def build_reflexion_context(
     truncated = []
     for a in attempts:
         output = a.builder_output
-        if len(output) > _MAX_BUILDER_OUTPUT_CHARS:
-            output = output[:_MAX_BUILDER_OUTPUT_CHARS] + "... [truncated]"
+        if len(output) > MAX_BUILDER_OUTPUT_CHARS:
+            output = output[:MAX_BUILDER_OUTPUT_CHARS] + "... [truncated]"
         truncated.append(
             ReflexionAttempt(
                 attempt_number=a.attempt_number,
