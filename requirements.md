@@ -592,7 +592,7 @@ Check `tero2/config.py` — add `projects_dir: str = ""` to `Config` if missing.
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/test_project_init.py -v`
 Expected: All 6 tests PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tero2/project_init.py tests/test_project_init.py
@@ -606,10 +606,10 @@ git commit -m "add project_init module for project scaffolding"
 ### Task 7: Create `telegram_input.py`
 
 **Files:**
-- [ ] Create: `tero2/telegram_input.py`
-- [ ] Test: `tests/test_telegram_input.py`
+- [x] Create: `tero2/telegram_input.py`
+- [x] Test: `tests/test_telegram_input.py`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```python
 # tests/test_telegram_input.py
@@ -662,12 +662,12 @@ def test_handle_message_enqueues_plan():
     assert "auth" in name.lower()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/test_telegram_input.py -v`
 Expected: ImportError
 
-- [ ] **Step 3: Implement telegram_input.py**
+- [x] **Step 3: Implement telegram_input.py**
 
 ```python
 # tero2/telegram_input.py
@@ -758,12 +758,12 @@ class TelegramInputBot:
             consumer.cancel()
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/test_telegram_input.py -v`
 Expected: All 5 tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tero2/telegram_input.py tests/test_telegram_input.py
@@ -777,15 +777,15 @@ git commit -m "add telegram_input module for receiving plans via Telegram"
 ### Task 8: Integrate reflexion + stuck detection into runner.py
 
 **Files:**
-- [ ] Modify: `tero2/runner.py`
-- [ ] Test: `tests/test_runner_reflexion.py`
+- [x] Modify: `tero2/runner.py`
+- [x] Test: `tests/test_runner_reflexion.py`
 
 This is the key integration. The runner's `_execute_plan()` method gets:
-- [ ] **Reflexion** (MVP1): on failure, accumulate context, inject into next retry
-- [ ] **Stuck detection** (MVP2): check signals after each attempt + mid-step tool repeat
-- [ ] **Escalation** (MVP2): 3-level response to stuck signals
+- [x] **Reflexion** (MVP1): on failure, accumulate context, inject into next retry
+- [x] **Stuck detection** (MVP2): check signals after each attempt + mid-step tool repeat
+- [x] **Escalation** (MVP2): 3-level response to stuck signals
 
-- [ ] **Step 1: Write failing test for runner reflexion injection**
+- [x] **Step 1: Write failing test for runner reflexion injection**
 
 ```python
 # tests/test_runner_reflexion.py
@@ -852,12 +852,12 @@ async def test_reflexion_prompt_injected_on_second_attempt(tmp_path: Path) -> No
     )
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/test_runner_reflexion.py -v`
 Expected: FAIL — reflexion is not yet injected in runner
 
-- [ ] **Step 3: Modify `_run_agent()` to return captured output**
+- [x] **Step 3: Modify `_run_agent()` to return captured output**
 
 **Critical:** `_run_agent()` currently returns `bool`. Reflexion needs `builder_output: str` from the agent's run. Change the signature to return `tuple[bool, str]`.
 
@@ -927,7 +927,7 @@ async def _run_agent(
             await heartbeat_task
 ```
 
-- [ ] **Step 4: Integrate reflexion into `_execute_plan()`**
+- [x] **Step 4: Integrate reflexion into `_execute_plan()`**
 
 ```python
 # In tero2/runner.py, add to imports:
@@ -968,17 +968,17 @@ if steer:
     effective_plan = f"## Steering\n{steer}\n\n---\n\n{effective_plan}"
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/test_runner_reflexion.py -v`
 Expected: PASS
 
-- [ ] **Step 6: Run full test suite**
+- [x] **Step 6: Run full test suite**
 
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/ -v`
 Expected: All PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tero2/runner.py tero2/reflexion.py tests/test_runner_reflexion.py
