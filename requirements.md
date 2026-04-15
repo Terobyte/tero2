@@ -1022,7 +1022,7 @@ sub_telegram.set_defaults(func=cmd_telegram)
 
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && ruff check tero2/cli.py`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tero2/cli.py
@@ -1036,9 +1036,9 @@ git commit -m "add telegram CLI subcommand"
 ### Task 10: Integration tests
 
 **Files:**
-- [ ] Create: `tests/test_integration_mvp1_mvp2.py`
+- [x] Create: `tests/test_integration_mvp1_mvp2.py`
 
-- [ ] **Step 1: Write integration tests**
+- [x] **Step 1: Write integration tests**
 
 ```python
 # tests/test_integration_mvp1_mvp2.py
@@ -1098,17 +1098,17 @@ def test_config_all_sections():
     assert cfg.escalation.diversification_max_steps == 4
 ```
 
-- [ ] **Step 2: Run integration tests**
+- [x] **Step 2: Run integration tests**
 
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/test_integration_mvp1_mvp2.py -v`
 Expected: All PASS
 
-- [ ] **Step 3: Run full test suite + lint**
+- [x] **Step 3: Run full test suite + lint**
 
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/ -v && ruff check tero2/`
 Expected: All green
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tests/test_integration_mvp1_mvp2.py
@@ -1120,9 +1120,9 @@ git commit -m "add MVP1+MVP2 integration tests"
 ### Task 11: Acceptance verification
 
 **MVP1 acceptance:**
-- [ ] Reflexion: on executor failure → failure context injected into retry prompt
-- [ ] After max reflexion cycles → task marked FAILED → Telegram notification
-- [ ] Telegram: send text plan → project created → executor starts
+- [x] Reflexion: on executor failure → failure context injected into retry prompt
+- [x] After max reflexion cycles → task marked FAILED → Telegram notification
+- [x] Telegram: send text plan → project created → executor starts
 - [ ] Only allowed `chat_id`s can interact with the bot
 - [ ] `tero2 status` shows current phase
 - [ ] `.sora/` scaffolded by `project_init`
