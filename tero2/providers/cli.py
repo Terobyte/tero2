@@ -182,8 +182,9 @@ class CLIProvider(BaseProvider):
         assert proc.stdout is not None
         stderr_task = asyncio.create_task(proc.stderr.read()) if proc.stderr else None
 
+        lines: list[str] = []
         async for line in proc.stdout:
-            yield line.decode(errors="replace")
+            lines.append(line.decode(errors="replace"))
 
         stderr_bytes = await stderr_task if stderr_task else b""
         await proc.wait()
@@ -192,3 +193,18 @@ class CLIProvider(BaseProvider):
             err_msg = stderr_bytes.decode(errors="replace").strip()
             log.error("%s exited %d: %s", self._name, proc.returncode, err_msg)
             raise ProviderError(f"{self._name} exited {proc.returncode}: {err_msg}")
+
+        for raw_line in lines:
+            stripped = raw_line.strip()
+            if not stripped:
+                continue
+            try:
+                parsed = json.loads(stripped)
+                if isinstance(parsed, dict):
+                    yield parsed
+                else:
+                    yield {"type": "text", "text": stripped}
+            except json.JSONDecodeError:
+                yield {"type": "text", "text": stripped}
+
+        yield {"type": "turn_end", "text": ""}

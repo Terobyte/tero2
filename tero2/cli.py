@@ -4,6 +4,7 @@ Commands:
     tero2 run <project_path> --plan <plan.md>   — run agent on project
     tero2 status <project_path>                  — show current state
     tero2 init <project_path>                    — initialize .sora/ structure
+    tero2 telegram                               — start Telegram plan-input bot
 """
 
 from __future__ import annotations
@@ -63,10 +64,11 @@ def cmd_run(args: argparse.Namespace) -> None:
 
 def cmd_status(args: argparse.Namespace) -> None:
     project_path = Path(args.project_path).expanduser().resolve()
-    state_file = project_path / ".sora" / "runtime" / "STATE.json"
+    runtime_dir = project_path / ".sora" / "runtime"
+    state_file = runtime_dir / "STATE.json"
 
-    if not state_file.is_file():
-        print("no state found — run `tero2 init` first")
+    if not runtime_dir.is_dir():
+        print("not initialized — run `tero2 init` first")
         return
 
     from tero2.state import AgentState
@@ -95,6 +97,30 @@ def cmd_init(args: argparse.Namespace) -> None:
     print(f"initialized .sora/ in {project_path}")
 
 
+def cmd_telegram(args: argparse.Namespace) -> None:
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+
+    from tero2.config import load_config
+
+    config = load_config(Path.cwd())
+    if not config.telegram or not config.telegram.bot_token:
+        print("error: telegram bot_token not configured")
+        sys.exit(1)
+
+    from tero2.telegram_input import TelegramInputBot
+
+    bot = TelegramInputBot(config)
+    print("starting Telegram input bot — Ctrl+C to stop")
+    try:
+        asyncio.run(bot.start())
+    except KeyboardInterrupt:
+        asyncio.run(bot.stop())
+        print("bot stopped")
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tero2", description="Immortal Runner")
 
@@ -115,4 +141,12 @@ def _build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("project_path", help="Path to the project root")
     init_parser.set_defaults(func=cmd_init)
 
+    telegram_parser = subparsers.add_parser("telegram", help="Start Telegram plan-input bot")
+    telegram_parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
+    telegram_parser.set_defaults(func=cmd_telegram)
+
     return parser
+
+
+if __name__ == "__main__":
+    main()

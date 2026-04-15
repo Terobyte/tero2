@@ -181,8 +181,8 @@ class TestCrashAutoRestart:
         2. Custom streaming chain yields each line immediately (no buffering)
            so the runner saves checkpoints after each tool_result
         3. After ~0.55s, SIGKILL the subprocess
-        4. Generator stops, runner task ends with error
-        5. State on disk: phase=RUNNING, steps_in_task >= 1
+        4. ProviderError is caught as recoverable, runner retries
+        5. State on disk: phase=RUNNING, retry_count >= 1
         6. New Runner restores from checkpoint and completes
         """
         from tero2.runner import Runner
@@ -245,8 +245,9 @@ class TestCrashAutoRestart:
             pytest.skip("runner finished before SIGKILL")
 
         assert st.phase == Phase.RUNNING, f"expected RUNNING, got {st.phase}"
-        assert st.steps_in_task >= 1, (
-            f"expected >= 1 checkpointed step after SIGKILL, got {st.steps_in_task}"
+        assert st.retry_count >= 1, (
+            f"expected >= 1 retry after SIGKILL, got {st.retry_count}. "
+            "Runner should catch ProviderError from killed subprocess and retry."
         )
 
         fast = _SlowChain([{"type": "tool_result", "content": "ok"}], delay=0.01)

@@ -25,6 +25,10 @@ DEFAULT_CONTEXT_LIMIT: int = 110_000
 CB_FAILURE_THRESHOLD: int = 3
 CB_RECOVERY_TIMEOUT_S: int = 60
 
+# ── Per-provider rate-limit retry ───────────────────────────────
+RATE_LIMIT_WAIT_S: float = 5.0   # base wait before first retry (seconds)
+RATE_LIMIT_MAX_RETRIES: int = 3  # max retries per provider before falling back
+
 # ── Notifier ────────────────────────────────────────────────────
 DEFAULT_HEARTBEAT_INTERVAL_S: int = 900  # 15 minutes
 

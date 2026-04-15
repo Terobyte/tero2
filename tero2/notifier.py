@@ -53,6 +53,7 @@ class Notifier:
         if audio_path is None:
             return False
         try:
+
             def _upload() -> int:
                 with open(audio_path, "rb") as f:
                     resp = requests.post(
@@ -90,10 +91,18 @@ class Notifier:
         try:
             import sys
 
-            sys.path.insert(0, str(TTS_SCRIPT.parent.parent))
-            from library.tts_fish_audio import tts_fish_audio_simple
+            target = str(TTS_SCRIPT.parent.parent)
+            inserted = target not in sys.path
+            if inserted:
+                sys.path.insert(0, target)
+            try:
+                from library.tts_fish_audio import tts_fish_audio_simple
 
-            return Path(tts_fish_audio_simple(text))
+                result = tts_fish_audio_simple(text)
+            finally:
+                if inserted and target in sys.path:
+                    sys.path.remove(target)
+            return Path(result)
         except Exception:
             log.warning("TTS generation failed", exc_info=True)
             return None

@@ -1,73 +1,70 @@
 # tero2 Bug Audit
 
-## OPEN Bugs (5) — 9/9 tests RED, 0 false positive
-
-| # | Bug | Severity | TDD Proof |
-|---|-----|----------|-----------|
-| 13 | ProviderError from CLI crash kills runner | CRITICAL | **RED** (2 tests) |
-| 14 | config.retry.max_retries ignored (hardcoded constant) | HIGH | **RED** |
-| 15 | No max_steps_per_task enforcement | HIGH | **RED** (2 tests) |
-| 16 | lock.release() deletes other process's lock file | MEDIUM | **RED** (2 tests) |
-| 17 | Telegram Markdown parse_mode fails on special chars | MEDIUM | **RED** (2 tests) |
-
-Tests: `tests/test_bugs.py`
+## OPEN Bugs (0)
 
 ---
 
-### 13. `ProviderError` from CLI crash kills the entire runner — **OPEN** (`chain.py:50-51`, `runner.py:198-202`)
+## FIXED Bugs (5)
 
-When a CLI tool exits non-zero (segfault, OOM, bad args), `cli.py:194` raises `ProviderError`. But `_is_recoverable_error()` only recognizes `RateLimitError`, `ProviderTimeoutError`, `ProviderNotReadyError`. The chain re-raises immediately without trying the next provider, and the exception propagates unhandled through `_execute_plan` → `run()` → process crash.
+### Bug 6 — `_execute_plan` ignores existing `retry_count` after crash recovery
 
-**TDD proof:**
-- `test_chain_tries_fallback_on_providererror` — chain with crasher + fallback re-raises `ProviderError` instead of trying fallback. **RED**: `ProviderError: cli segfaulted`.
-- `test_run_agent_returns_false_on_providererror` — `_run_agent` should return `False` but re-raises `ProviderError`. **RED**: unhandled exception propagates.
+**Severity:** High
+**Status:** ✅ Fixed — `range(state.retry_count, self.config.retry.max_retries)`
+**Location:** `runner.py` — `_execute_plan` retry loop
+**Proof:** `test_retry_count_respects_max_after_crash_recovery`, `test_execute_plan_source_accounts_for_retry_count`
 
-**Fix:** Treat `ProviderError` as recoverable (retry with next provider / retry the chain), or catch it in `_run_agent` and return `False`.
+`_execute_plan` uses `range(self.config.retry.max_retries)` which always starts from 0, ignoring the `retry_count` already stored in the restored state. After crash recovery with `retry_count=2` and `max_retries=3`, the loop runs 3 more times for a total of 5 attempts — exceeding the configured maximum.
 
-### 14. `config.retry.max_retries` ignored — **OPEN** (`runner.py:98`)
+**Impact:** Runner silently exceeds the retry budget. A task that should fail after 3 attempts instead gets 3+ extra attempts after each crash, potentially spending hours on a doomed task.
 
-```python
-for attempt in range(MAX_TASK_RETRIES):  # hardcoded constant = 3
-```
+---
 
-Should be `self.config.retry.max_retries`. User-configured `max_retries` in TOML is silently ignored.
+### Bug 7 — `max_steps_per_task` exceeded causes infinite crash loop
 
-**TDD proof:**
-- `test_runner_uses_config_max_retries_not_constant` — source of `_execute_plan` contains `MAX_TASK_RETRIES`. **RED**: assertion fails, string found in source.
+**Severity:** Critical
+**Status:** ✅ Fixed — `increment_step` no longer raises; STEP_LIMIT detected mid-attempt in `_run_agent`
+**Location:** `checkpoint.py:89-93` — `increment_step`
+**Proof:** `test_max_steps_exceeded_marks_failed_not_crash`, `test_increment_step_does_not_raise_on_limit`
 
-### 15. No `max_steps_per_task` enforcement — **OPEN** (`runner.py`, `checkpoint.py:87-89`)
+`increment_step` increments `steps_in_task`, checks against max, and raises `RuntimeError` **before** calling `self.save()`. The state on disk is stale. `RuntimeError` is not in `_is_recoverable_error`, so it propagates through `_run_agent` → `_execute_plan` → `run()` without any catch-all. State stays RUNNING on disk. On restart, the runner restores the stale state, hits the same check, and crashes again — infinite loop.
 
-`MAX_STEPS_PER_TASK=15` is defined and parsed into `config.retry.max_steps_per_task`, but nothing ever checks `state.steps_in_task >= limit`. A runaway agent loops forever with no step cap.
+**Impact:** Once a task hits the step limit, the runner enters an unrecoverable crash loop. The only escape is manual intervention (deleting STATE.json).
 
-**TDD proof:**
-- `test_increment_step_raises_at_limit` — calls `increment_step` past limit (15 → 16). **RED**: `DID NOT RAISE` — no enforcement exists.
-- `test_increment_step_source_has_limit_check` — source of `increment_step` does not contain `max_steps`. **RED**: assertion fails.
+---
 
-### 16. `lock.release()` deletes another process's lock file — **OPEN** (`lock.py:46`)
+### Bug 8 — `ProviderChain` yields duplicate messages on internal retry
 
-```python
-def release(self) -> None:
-    if self._fd is not None:
-        # ...funlock + close...
-    self.lock_path.unlink(missing_ok=True)  # always runs
-```
+**Severity:** High
+**Status:** ✅ Fixed — messages buffered in chain; only forwarded to consumer on success
+**Location:** `chain.py:66-74` — `ProviderChain.run` retry loop
+**Proof:** `test_no_duplicate_messages_on_retry`, `test_runner_receives_duplicate_tool_results_via_chain`
 
-In `runner.py:77-85`, if `acquire()` raises `LockHeldError`, the `finally` block still calls `release()`. Since `_fd is None`, the flock code is skipped but the lock file is still unlinked — deleting another process's lock.
+When a provider yields some messages (e.g., `tool_result`) and then raises a recoverable error (e.g., `RateLimitError`), the chain catches it and retries the same provider. The consumer receives **all** messages from **all** attempts — including duplicates. With `rate_limit_max_retries=1`, a provider that yields 2 messages produces 4 total (2 original + 2 duplicate).
 
-**TDD proof:**
-- `test_release_without_acquire_preserves_lock_file` — creates lock file, sets `_fd=None`, calls `release()`. **RED**: file deleted, `exists()` returns `False`.
-- `test_release_skips_unlink_when_fd_is_none` — same scenario. **RED**: file deleted.
+**Impact:** The runner calls `increment_step` for each duplicate message, inflating the step count. With 3 retries in `_execute_plan`, a single failing provider causes 12 step increments instead of 2. This can prematurely exhaust `max_steps_per_task` (see Bug 7) and cause the runner to process the same tool results multiple times (duplicate file edits, duplicate commands, etc.).
 
-**Fix:** Move `unlink` inside the `if self._fd is not None` block.
+---
 
-### 17. Telegram `parse_mode="Markdown"` fails on special characters — **OPEN** (`notifier.py:41`)
+### Bug 9 — Non-recoverable exceptions leave state as RUNNING (no FAILED mark)
 
-```python
-data={"chat_id": ..., "text": text, "parse_mode": "Markdown"},
-```
+**Severity:** High
+**Status:** ✅ Fixed — `except Exception` catch-all in `run()` marks FAILED before re-raising
+**Location:** `runner.py:64-87` — `Runner.run`
+**Proof:** `test_config_error_marks_state_failed`, `test_runtime_error_marks_state_failed`, `test_run_source_has_catch_all_for_failed_state`
 
-No escaping of `_`, `` ` ``, `[`, etc. Messages containing these characters (common in error messages like "step_1" or "`code`") get rejected by Telegram API with HTTP 400. The exception is caught and logged as "telegram send failed" — notifications silently disappear.
+`Runner.run()` only catches `LockHeldError`. Any other exception that propagates out of `_execute_plan` (e.g., `ConfigError`, `RuntimeError`) exits without saving FAILED state. The `finally` block only releases the lock. On next run, the state is RUNNING with stale data, and `_execute_plan` starts a fresh retry loop (see Bug 6).
 
-**TDD proof:**
-- `test_send_does_not_pass_raw_markdown` — sends `"error in step_1: \`code\` failed [done]"` with `parse_mode="Markdown"` without escaping. **RED**: raw special chars + Markdown parse_mode.
-- `test_send_source_escapes_or_drops_markdown` — source has `parse_mode="Markdown"` but no `escape`/`replace`. **RED**: assertion fails.
+**Impact:** After any unhandled crash, the runner restores a RUNNING state on next start. Combined with Bug 6, this can give the runner a full extra set of retry attempts. The FAILED state is never persisted, making it impossible to detect failure from the CLI (`tero2 status` shows "running").
+
+---
+
+### Bug 10 — `CLIProvider` yields stdout before checking exit code
+
+**Severity:** Medium
+**Status:** ✅ Fixed — stdout buffered; exit code checked before yielding
+**Location:** `cli.py:185-194` — `CLIProvider.run`
+**Proof:** `test_cli_provider_source_checks_exit_code_before_yield`, `test_cli_provider_does_not_yield_on_nonzero_exit`
+
+`CLIProvider.run()` yields all stdout lines via `async for line in proc.stdout`, then checks `proc.returncode`. If the process exits non-zero, all output has already been delivered to the consumer. The consumer processes it as valid tool results, then `ProviderError` is raised.
+
+**Impact:** Output from a failed command is treated as successful tool results. The runner may execute actions based on corrupt/incomplete output. Combined with Bug 8, the chain then retries, executing the same prompt again — all previous actions are duplicated.

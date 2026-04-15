@@ -88,7 +88,5 @@ class CheckpointManager:
 
     def increment_step(self, state: AgentState) -> AgentState:
         state.steps_in_task += 1
-        if state.steps_in_task > self.max_steps_per_task:
-            raise RuntimeError(f"max_steps_per_task exceeded ({self.max_steps_per_task})")
         self.save(state)
         return state

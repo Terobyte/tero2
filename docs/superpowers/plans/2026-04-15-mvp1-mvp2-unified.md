@@ -9,15 +9,15 @@
 **Tech Stack:** Python 3.11+, asyncio, requests (existing dep), pytest, ruff
 
 **Current state of codebase:**
-- [x] MVP0: Fully implemented (runner, providers, state, checkpoint, disk_layer, notifier, CLI)
-- [x] MVP1: **NOT implemented** — reflexion.py, telegram_input.py, project_init.py missing
-- [x] MVP2: **Implemented but uncommitted** — stuck_detection.py, escalation.py, and runner.py MVP2 integration exist in the working tree (unstaged). `AgentState.tool_repeat_count` and `escalation_level` already in state.py. `StuckDetectionConfig`, `EscalationConfig`, and their Config fields + _parse_config already in config.py. Tasks 3+4 just verify correctness and commit.
+- MVP0: Fully implemented (runner, providers, state, checkpoint, disk_layer, notifier, CLI)
+- MVP1: **NOT implemented** — reflexion.py, telegram_input.py, project_init.py missing
+- MVP2: **Implemented but uncommitted** — stuck_detection.py, escalation.py, and runner.py MVP2 integration exist in the working tree (unstaged). `AgentState.tool_repeat_count` and `escalation_level` already in state.py. `StuckDetectionConfig`, `EscalationConfig`, and their Config fields + _parse_config already in config.py. Tasks 3+4 just verify correctness and commit.
 
 **⚠️ Key invariants for executor:**
-- [x] Do NOT re-add `tool_repeat_count`/`escalation_level` to `AgentState` — they're already there
-- [x] Do NOT re-add `stuck_detection`/`escalation` to `Config` — they're already there
-- [x] Do NOT create `test_stuck_detection.py` or `test_escalation.py` — use `tests/test_stuck_and_escalation.py`
-- [x] `_run_agent()` returns `tuple[bool, str]` after Task 8 — update all callers
+- Do NOT re-add `tool_repeat_count`/`escalation_level` to `AgentState` — they're already there
+- Do NOT re-add `stuck_detection`/`escalation` to `Config` — they're already there
+- Do NOT create `test_stuck_detection.py` or `test_escalation.py` — use `tests/test_stuck_and_escalation.py`
+- `_run_agent()` returns `tuple[bool, str]` after Task 8 — update all callers
 
 **Import path convention:** All specs use `src.` — implementation uses `tero2.` (see G1 in MVP1 spec).
 
@@ -57,13 +57,13 @@
 ### Task 1: Add all new config dataclasses
 
 **Files:**
-- [x] Modify: `tero2/config.py`
-- [x] Test: `tests/test_config_mvp1.py`
+- Modify: `tero2/config.py`
+- Test: `tests/test_config_mvp1.py`
 
 > `tero2/constants.py` — no changes needed (no unused constants added).
 > `tero2/state.py` — no changes needed (`tool_repeat_count` and `escalation_level` already present).
 
-- [x] **Step 1: Write failing test for new config fields**
+- [ ] **Step 1: Write failing test for new config fields**
 
 ```python
 # tests/test_config_mvp1.py
@@ -106,12 +106,12 @@ def test_config_has_all_new_sections():
     assert isinstance(cfg.escalation, EscalationConfig)
 ```
 
-- [x] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/test_config_mvp1.py -v`
 Expected: ImportError — new config classes don't exist yet
 
-- [x] **Step 3: Add `ReflexionConfig` dataclass + `allowed_chat_ids` to `TelegramConfig` + wire into `Config`**
+- [ ] **Step 3: Add `ReflexionConfig` dataclass + `allowed_chat_ids` to `TelegramConfig` + wire into `Config`**
 
 `StuckDetectionConfig`, `EscalationConfig`, and their fields on `Config` are already implemented. Only add what's missing:
 
@@ -165,12 +165,12 @@ class Config:
 
 Note: `AgentState.tool_repeat_count` and `AgentState.escalation_level` already exist in `tero2/state.py` — **do not re-add them**.
 
-- [x] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/test_config_mvp1.py -v`
 Expected: All 5 tests PASS
 
-- [x] **Step 5: Run full test suite for regressions**
+- [ ] **Step 5: Run full test suite for regressions**
 
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/ -v`
 Expected: All existing tests PASS
@@ -187,8 +187,8 @@ git commit -m "add reflexion config and allowed_chat_ids to telegram config"
 ### Task 2: Add `run_prompt_collected()` to ProviderChain
 
 **Files:**
-- [ ] Modify: `tero2/providers/chain.py`
-- [ ] Test: `tests/test_chain_collected.py`
+- Modify: `tero2/providers/chain.py`
+- Test: `tests/test_chain_collected.py`
 
 - [ ] **Step 1: Write failing test**
 
@@ -262,19 +262,19 @@ git commit -m "add run_prompt_collected to ProviderChain"
 ### Task 3: Verify and commit `stuck_detection.py`
 
 **Files:**
-- [ ] Verify: `tero2/stuck_detection.py` (already in working tree, unstaged)
-- [ ] Test: `tests/test_stuck_and_escalation.py` (already exists — comprehensive, Parts 1+4)
+- Verify: `tero2/stuck_detection.py` (already in working tree, unstaged)
+- Test: `tests/test_stuck_and_escalation.py` (already exists — comprehensive, Parts 1+4)
 
 > `tests/test_stuck_and_escalation.py` already exists with 35+ tests covering stuck detection, escalation, and runner integration. Do NOT create a new `test_stuck_detection.py` file — use the existing one.
 
 - [ ] **Step 1: Read `tero2/stuck_detection.py` and verify against spec**
 
 Key interface to verify:
-- [ ] `StuckSignal` enum: NONE, RETRY_EXHAUSTED, STEP_LIMIT, TOOL_REPEAT
-- [ ] `StuckResult` dataclass: signal, details, severity
-- [ ] `check_stuck(state, config)` → StuckResult (priority: RETRY > STEP > TOOL)
-- [ ] `compute_tool_hash(tool_call)` → 16-char hex (SHA-256[:16])
-- [ ] `update_tool_hash(state, tool_call)` → (state, is_repeat)
+- `StuckSignal` enum: NONE, RETRY_EXHAUSTED, STEP_LIMIT, TOOL_REPEAT
+- `StuckResult` dataclass: signal, details, severity
+- `check_stuck(state, config)` → StuckResult (priority: RETRY > STEP > TOOL)
+- `compute_tool_hash(tool_call)` → 16-char hex (SHA-256[:16])
+- `update_tool_hash(state, tool_call)` → (state, is_repeat)
 
 - [ ] **Step 2: Run existing tests for stuck detection (Part 1)**
 
@@ -293,22 +293,22 @@ git commit -m "add stuck detection module with 3 structural signals"
 ### Task 4: Verify and commit `escalation.py`
 
 **Files:**
-- [ ] Verify: `tero2/escalation.py` (already in working tree, unstaged)
-- [ ] Test: `tests/test_stuck_and_escalation.py` (already exists — comprehensive, Parts 2+3+4)
+- Verify: `tero2/escalation.py` (already in working tree, unstaged)
+- Test: `tests/test_stuck_and_escalation.py` (already exists — comprehensive, Parts 2+3+4)
 
 > Do NOT create a new `test_escalation.py`. All escalation tests are in `tests/test_stuck_and_escalation.py`.
 
 - [ ] **Step 1: Read `tero2/escalation.py` and verify against spec**
 
 Key interface to verify:
-- [ ] `EscalationLevel` enum: NONE=0, DIVERSIFICATION=1, BACKTRACK_COACH=2, HUMAN=3
-- [ ] `EscalationAction` dataclass: level, inject_prompt, should_backtrack, should_pause
-- [ ] `decide_escalation(stuck_result, current_level, diversification_steps, config)` → EscalationAction
-- [ ] `execute_escalation(action, state, disk, notifier, checkpoint, ...)` → AgentState
-- [ ] `write_stuck_report(disk, state, stuck_result, escalation_history)` → None
-- [ ] Level 1: inject diversification prompt
-- [ ] Level 2: reset stuck counters, write EVENT_JOURNAL, resume
-- [ ] Level 3: write STUCK_REPORT.md, Telegram notify, PAUSE
+- `EscalationLevel` enum: NONE=0, DIVERSIFICATION=1, BACKTRACK_COACH=2, HUMAN=3
+- `EscalationAction` dataclass: level, inject_prompt, should_backtrack, should_pause
+- `decide_escalation(stuck_result, current_level, diversification_steps, config)` → EscalationAction
+- `execute_escalation(action, state, disk, notifier, checkpoint, ...)` → AgentState
+- `write_stuck_report(disk, state, stuck_result, escalation_history)` → None
+- Level 1: inject diversification prompt
+- Level 2: reset stuck counters, write EVENT_JOURNAL, resume
+- Level 3: write STUCK_REPORT.md, Telegram notify, PAUSE
 
 - [ ] **Step 2: Run existing escalation + runner integration tests**
 
@@ -329,8 +329,8 @@ git commit -m "add 3-level escalation and wire into runner"
 ### Task 5: Create `reflexion.py`
 
 **Files:**
-- [ ] Create: `tero2/reflexion.py`
-- [ ] Test: `tests/test_reflexion.py`
+- Create: `tero2/reflexion.py`
+- Test: `tests/test_reflexion.py`
 
 - [ ] **Step 1: Write failing tests**
 
@@ -474,8 +474,8 @@ git commit -m "add reflexion module for failure context injection"
 ### Task 6: Create `project_init.py`
 
 **Files:**
-- [ ] Create: `tero2/project_init.py`
-- [ ] Test: `tests/test_project_init.py`
+- Create: `tero2/project_init.py`
+- Test: `tests/test_project_init.py`
 
 - [ ] **Step 1: Write failing tests**
 
@@ -606,8 +606,8 @@ git commit -m "add project_init module for project scaffolding"
 ### Task 7: Create `telegram_input.py`
 
 **Files:**
-- [ ] Create: `tero2/telegram_input.py`
-- [ ] Test: `tests/test_telegram_input.py`
+- Create: `tero2/telegram_input.py`
+- Test: `tests/test_telegram_input.py`
 
 - [ ] **Step 1: Write failing tests**
 
@@ -777,13 +777,13 @@ git commit -m "add telegram_input module for receiving plans via Telegram"
 ### Task 8: Integrate reflexion + stuck detection into runner.py
 
 **Files:**
-- [ ] Modify: `tero2/runner.py`
-- [ ] Test: `tests/test_runner_reflexion.py`
+- Modify: `tero2/runner.py`
+- Test: `tests/test_runner_reflexion.py`
 
 This is the key integration. The runner's `_execute_plan()` method gets:
-- [ ] **Reflexion** (MVP1): on failure, accumulate context, inject into next retry
-- [ ] **Stuck detection** (MVP2): check signals after each attempt + mid-step tool repeat
-- [ ] **Escalation** (MVP2): 3-level response to stuck signals
+1. **Reflexion** (MVP1): on failure, accumulate context, inject into next retry
+2. **Stuck detection** (MVP2): check signals after each attempt + mid-step tool repeat
+3. **Escalation** (MVP2): 3-level response to stuck signals
 
 - [ ] **Step 1: Write failing test for runner reflexion injection**
 
@@ -990,7 +990,7 @@ git commit -m "integrate reflexion into runner retry loop"
 ### Task 9: Add `telegram` CLI subcommand
 
 **Files:**
-- [ ] Modify: `tero2/cli.py`
+- Modify: `tero2/cli.py`
 
 - [ ] **Step 1: Read current cli.py structure**
 
@@ -1036,7 +1036,7 @@ git commit -m "add telegram CLI subcommand"
 ### Task 10: Integration tests
 
 **Files:**
-- [ ] Create: `tests/test_integration_mvp1_mvp2.py`
+- Create: `tests/test_integration_mvp1_mvp2.py`
 
 - [ ] **Step 1: Write integration tests**
 

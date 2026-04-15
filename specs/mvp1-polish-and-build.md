@@ -6,17 +6,19 @@
 
 ## 1. What This MVP Achieves
 
-**Problem:** Plans go straight to the builder unreviewed. 30–70% completion rate. Bugs born in the plan survive to code.
+**Problem:** The executor retries blindly with no failure context. Plans arrive only from the CLI. No Telegram workflow.
 
-**After MVP1:** Send a markdown plan (file or Telegram message) → tero2 hardens the plan (3–5 adversarial review rounds) → builds code with verification (Builder + Verifier) → retries with reflexion on failure → notifies you when done.
+**After MVP1:** Send a markdown plan (file or Telegram message) → tero2 executes → retries with reflexion (failure context injected) → notifies you when done.
 
 **Key additions over MVP0:**
-- **Plan Hardening** — iterative adversarial review before any code is written
-- **Builder + Verifier** — specialized roles with distinct prompts
 - **Reflexion** — failed attempts inject failure context into retries
-- **Persona system** — role prompts loaded from `.md` files
-- **Context Assembly** — smart prompt construction with budget control
 - **Telegram input** — receive plans via Telegram, create projects automatically
+
+**Deferred (not in MVP1):**
+- **Plan Hardening** — iterative adversarial review — deferred to later MVP
+- **Builder + Verifier roles** — specialized roles with distinct prompts — deferred to later MVP
+- **Persona system** — role prompts loaded from `.md` files — deferred to later MVP
+- **Context Assembly** — smart prompt construction with budget control — deferred to later MVP
 
 ---
 
@@ -40,26 +42,17 @@ MVP1 adds:
                                │
                     ┌──────────▼──────────┐
                     │  runner.py (v1)     │  ← Dispatcher v1
-                    │  Plan → Harden →   │
-                    │  Execute → Complete │
-                    └──┬──────┬──────┬───┘
-                       │      │      │
-              ┌────────▼┐  ┌──▼────┐ │
-              │plan_hard│  │players│ │
-              │ening.py │  │       │ │
-              └────┬────┘  │builder│ │
-                   │       │verif. │ │
-              ┌────▼────┐  └──┬────┘ │
-              │persona  │     │      │
-              │.py      │  ┌──▼────┐ │
-              └─────────┘  │reflex │ │
-                           │ion.py │ │
-              ┌─────────┐  └───────┘ │
-              │context_  │           │
-              │assembly  ├───────────┘
-              │.py       │
-              └──────────┘
+                    │  Plan → Execute →  │
+                    │  Reflexion →       │
+                    │  Complete          │
+                    └──────────┬──────────┘
+                               │
+                        ┌──────▼───────┐
+                        │ reflexion.py │  ← failure context injection
+                        └──────────────┘
 ```
+
+**Not in MVP1 (deferred):** plan_hardening.py, persona.py, context_assembly.py, players/builder.py, players/verifier.py
 
 ---
 
@@ -70,70 +63,33 @@ New files added to the MVP0 tree:
 ```
 src/
 ├── ... (MVP0 modules)
-├── persona.py                    # NEW — persona/prompt registry
-├── context_assembly.py           # NEW — smart prompt builder
-├── plan_hardening.py             # NEW — iterative plan review
 ├── reflexion.py                  # NEW — failure context injection
 ├── telegram_input.py             # NEW — Telegram bot for receiving plans
 ├── project_init.py               # NEW — project scaffolding
-├── players/                      # NEW directory
-│   ├── __init__.py
-│   ├── builder.py                # NEW — code writer player
-│   └── verifier.py               # NEW — quality gate player
-└── runner.py                     # UPDATED — Dispatcher v1 cycle
+└── runner.py                     # UPDATED — Dispatcher v1 with reflexion
 ```
 
-Prompt files (created by `project_init` or manually):
-
+**Not added in MVP1 (deferred):**
 ```
-.sora/prompts/
-├── builder.md
-├── verifier.md
-├── reviewer_review.md            # find-issues mode (outputs JSON)
-└── reviewer_fix.md               # apply-fixes mode (outputs raw markdown)
+# DEFERRED — not in MVP1:
+# ├── persona.py                  # persona/prompt registry
+# ├── context_assembly.py         # smart prompt builder
+# ├── plan_hardening.py           # iterative plan review
+# ├── players/
+# │   ├── builder.py              # code writer player
+# │   └── verifier.py             # quality gate player
+# └── .sora/prompts/*.md          # bundled role prompt files
 ```
 
 ---
 
 ## 4. Updated Config
 
-MVP1 adds roles and plan hardening settings to `config.toml`:
+> **⚠️ NOT YET IMPLEMENTED** — `ReflexionConfig`, `Config.reflexion`, and `TelegramConfig.allowed_chat_ids` are not yet in `config.py`. `_parse_config` does not yet parse `[reflexion]` or `allowed_chat_ids`.
+
+MVP1 adds reflexion and telegram settings to `config.toml`:
 
 ```toml
-# ── Roles (MVP1 replaces the single "executor" from MVP0) ──────
-
-[roles.builder]
-provider = "opencode"
-model = "z.ai/glm-5.1"
-fallback = ["codex", "kilo"]
-max_turns = 100
-
-[roles.verifier]
-provider = "kilo"
-model = "kilo/xiaomi/mimo-v2-pro:free"
-fallback = ["opencode"]
-max_turns = 30
-
-[roles.reviewer]
-provider = "kilo"
-model = "kilo/xiaomi/mimo-v2-pro:free"
-fallback = ["opencode"]
-max_turns = 15
-
-# ── Plan Hardening ──────────────────────────────────────────────
-
-[plan_hardening]
-max_rounds = 5                    # hard cap on review iterations
-stop_on_cosmetic_only = true      # stop if only style issues remain
-
-# ── Context Assembly ────────────────────────────────────────────
-
-[context]
-target_ratio = 0.70               # target context window fill
-warning_ratio = 0.80
-hard_fail_ratio = 0.95
-optimal_builder_tokens = 15000    # Sweep finding: 10-15K is optimal
-
 # ── Reflexion ───────────────────────────────────────────────────
 
 [reflexion]
@@ -150,31 +106,8 @@ allowed_chat_ids = ["614473938"]  # only accept from these chats
 
 ```python
 @dataclass
-class PlanHardeningConfig:
-    max_rounds: int = 5
-    stop_on_cosmetic_only: bool = True
-
-@dataclass
-class ContextConfig:
-    target_ratio: float = 0.70
-    warning_ratio: float = 0.80
-    hard_fail_ratio: float = 0.95
-    optimal_builder_tokens: int = 15_000
-
-@dataclass
 class ReflexionConfig:
     max_cycles: int = 2
-
-@dataclass
-class RoleConfig:
-    """Updated — max_turns removed (meaningless for CLI subprocess providers).
-    CLI providers are fire-and-forget subprocesses — turn tracking does not apply.
-    Use timeout_s to bound execution time instead.
-    """
-    provider: str
-    model: str = ""
-    fallback: list[str] = field(default_factory=list)
-    timeout_s: int = DEFAULT_PROVIDER_TIMEOUT_S
 
 @dataclass
 class TelegramConfig:
@@ -188,60 +121,42 @@ class TelegramConfig:
 
 @dataclass
 class Config:
-    """Updated root config — add new sections."""
+    """Updated root config — add reflexion section."""
     # ... existing MVP0 fields ...
-    plan_hardening: PlanHardeningConfig = field(default_factory=PlanHardeningConfig)
-    context: ContextConfig = field(default_factory=ContextConfig)
     reflexion: ReflexionConfig = field(default_factory=ReflexionConfig)
 ```
 
 **Note on `_parse_config`:** When loading `[telegram]` from TOML, `allowed_chat_ids` must be parsed as `list[str]` (TOML array of strings). If missing from config file, defaults to `[]`.
 
+**Deferred config (not in MVP1):**
+```toml
+# NOT IN MVP1 — deferred:
+# [roles.builder], [roles.verifier], [roles.reviewer]  — no role system
+# [plan_hardening]                                      — no plan hardening
+# [context]                                             — no context assembly
+```
+
 ---
 
 ## 4.X Updated `src/errors.py`
 
-Add to `errors.py` (MVP0 module, new exception for MVP1):
-
-```python
-# ── Context errors ───────────────────────────────────────────────
-
-class ContextWindowExceededError(Tero2Error):
-    """Mandatory context parts alone exceed the model's context window budget.
-
-    Raised by assemble_context() when role_prompt + task_plan exceed hard_fail_ratio.
-    The caller must either shorten the plan or use a model with a larger context window.
-    """
-    def __init__(self, tokens: int, limit: int) -> None:
-        self.tokens = tokens
-        self.limit = limit
-        super().__init__(
-            f"Context too large: {tokens} tokens exceeds limit {limit}"
-        )
-```
+No new exceptions required for MVP1. `ContextWindowExceededError` is deferred with context assembly.
 
 ---
 
 ## 4.Y Updated `src/state.py` — Phase enum
 
-Add two new phases required by the MVP1 dispatcher. Update the `Phase` enum in `state.py`:
+No changes to `Phase` enum required for MVP1. The `HARDENING` and `EXECUTING` phases are deferred with plan hardening and the Builder/Verifier role system.
 
+MVP0 Phase enum is sufficient:
 ```python
 class Phase(str, Enum):
-    """Execution phases for the runner state machine."""
     IDLE = "idle"
-    HARDENING = "hardening"        # NEW — Plan Hardening convergence loop
-    EXECUTING = "executing"        # NEW — Builder+Verifier task loop
-    RUNNING = "running"            # kept for MVP0 compat (single-executor mode)
-    PAUSED = "paused"              # waiting for human input
+    RUNNING = "running"
+    PAUSED = "paused"
     COMPLETED = "completed"
     FAILED = "failed"
 ```
-
-`tero2 status` maps runner state to display string:
-- `Phase.HARDENING` → "HARDENING (round N/M)"
-- `Phase.EXECUTING` → "EXECUTING (task N/M)"
-- `Phase.COMPLETED` → "COMPLETED"
 
 ---
 
@@ -250,6 +165,9 @@ class Phase(str, Enum):
 ---
 
 ### 5.1 `src/persona.py`
+
+> **⚠️ DEFERRED — Not in MVP1.** No persona/prompt system — deferred to later MVP. Do NOT implement this module.
+
 
 **Purpose:** Load role prompts from `.md` files with YAML frontmatter.
 
@@ -354,6 +272,9 @@ class PersonaRegistry:
 ---
 
 ### 5.2 `src/context_assembly.py`
+
+> **⚠️ DEFERRED — Not in MVP1.** No context assembly — deferred to later MVP. Do NOT implement this module.
+
 
 **Purpose:** Build the full prompt for an agent with budget control. Ensures the agent gets exactly the right amount of context — not too much, not too little.
 
@@ -516,6 +437,9 @@ def assemble_reviewer_prompt(
 ---
 
 ### 5.3 `src/plan_hardening.py`
+
+> **⚠️ DEFERRED — Not in MVP1.** No plan hardening — deferred to later MVP. Do NOT implement this module.
+
 
 **Purpose:** Iterative adversarial review of the plan before any code is written. Each round uses a fresh context (Iron Rule).
 
@@ -720,6 +644,9 @@ Plan v0 (raw from user)
 
 ### 5.4 `src/players/builder.py`
 
+> **⚠️ DEFERRED — Not in MVP1.** No roles (Builder) — deferred to later MVP. Do NOT implement this module.
+
+
 **Purpose:** Code writing agent. Receives a task plan, writes code, commits.
 
 **Dependencies:** `src.providers.chain`, `src.persona`, `src.context_assembly`, `src.disk_layer`
@@ -811,6 +738,9 @@ def _extract_summary(output: str) -> str:
 ---
 
 ### 5.5 `src/players/verifier.py`
+
+> **⚠️ DEFERRED — Not in MVP1.** No roles (Verifier) — deferred to later MVP. Do NOT implement this module.
+
 
 **Purpose:** Quality gate. Runs tests, linters, checks must-haves. Decides PASS/FAIL/ANOMALY.
 
@@ -935,6 +865,8 @@ def extract_must_haves(plan: str) -> list[str]:
 
 ### 5.6 `src/reflexion.py`
 
+> **⚠️ NOT YET IMPLEMENTED** — `reflexion.py` does not exist. Retry loop runs without failure context injection.
+
 **Purpose:** When Builder fails, inject the failure context into the next attempt. The agent learns from its mistakes within the same task.
 
 **Dependencies:** `src.disk_layer`
@@ -1042,6 +974,8 @@ The `assemble_builder_prompt()` in `context_assembly.py` accepts `reflexion_cont
 
 ### 5.7 `src/telegram_input.py`
 
+> **⚠️ NOT YET IMPLEMENTED** — `telegram_input.py` does not exist. Telegram input workflow is unavailable.
+
 **Purpose:** Receive plans via Telegram. Long-polling bot that listens for markdown files or text plans.
 
 **Dependencies:** `src.config`, `src.project_init`, `src.notifier`
@@ -1146,6 +1080,8 @@ UserBot architecture (MTProto) comes in MVP6.
 
 ### 5.8 `src/project_init.py`
 
+> **⚠️ NOT YET IMPLEMENTED** — `project_init.py` does not exist. Project creation via Telegram is unavailable.
+
 **Purpose:** Create a new project directory with `.sora/` structure and git init.
 
 **Dependencies:** `src.disk_layer`, `src.config`
@@ -1182,7 +1118,9 @@ def init_project(
     5. Write plan to .sora/milestones/M001/ROADMAP.md
        Store this path in AgentState.plan_file so the runner can read it:
            state.plan_file = str(project_path / ".sora/milestones/M001/ROADMAP.md")
-    6. Copy default prompt files to .sora/prompts/
+
+    NOTE: .sora/prompts/ is NOT created here — persona/prompt system is
+    deferred. Do not call copy_default_prompts() in MVP1.
 
     Args:
         project_name: Name for the project (from plan heading or user input).
@@ -1214,49 +1152,41 @@ def _extract_project_name(plan: str) -> str:
     ...
 
 
-def copy_default_prompts(sora_prompts_dir: Path) -> None:
-    """Copy bundled default prompt .md files to .sora/prompts/.
-
-    Source: <tero2_root>/prompts/ (bundled with the package).
-    Only copies if the target doesn't already exist (no overwrite).
-    """
-    ...
+# copy_default_prompts — DEFERRED. Not in MVP1.
+# Persona/prompt system (.sora/prompts/) is deferred to a later MVP.
+# Do NOT implement this function or create .sora/prompts/ in MVP1.
 ```
 
 ---
 
 ### 5.9 Updated `src/runner.py` — Dispatcher v1
 
-**Purpose:** Updated runner with the full MVP1 execution cycle.
+**Purpose:** Updated runner with reflexion support on failure.
 
 **Changes from MVP0:**
-- Plan Hardening phase before execution
-- Builder + Verifier loop per task
-- Reflexion on Builder failure
-- Support for multi-task plans (parse tasks from hardened plan)
+- Reflexion on executor failure (inject failure context into retry)
+- Accepts plans from Telegram (via project_init)
+
+**NOT changed from MVP0 (deferred):** No plan hardening, no Builder/Verifier roles, no persona system, no context assembly.
 
 ```python
-"""Runner v1 — Dispatcher with Plan → Harden → Execute → Complete cycle.
+"""Runner v1 — Dispatcher with reflexion on failure.
 
 MVP1 execution flow:
-    1. Read plan (file or from Telegram)
-    2. Plan Hardening (adversarial review, 3-5 rounds)
-    3. For each task in the hardened plan:
-        a. Builder writes code
-        b. Verifier checks quality
-        c. PASS → next task
-        d. FAIL → Reflexion → Builder retry (max reflexion.max_cycles)
-        e. FAIL × max → ANOMALY → notify Telegram
-    4. All tasks done → COMPLETED → notify Telegram
+    1. Read plan (file or from Telegram / project_init)
+    2. Execute plan with executor provider
+    3. On failure: Reflexion — inject failure context → retry
+    4. After max retries → FAILED → notify Telegram
+    5. Success → COMPLETED → notify Telegram
 """
 
 from __future__ import annotations
 
-# ... (existing MVP0 imports plus new ones) ...
+# ... (existing MVP0 imports plus reflexion) ...
 
 
 class Runner:
-    """Updated runner with Plan Hardening and Builder+Verifier cycle."""
+    """Updated runner with reflexion on failure."""
 
     def __init__(
         self,
@@ -1264,72 +1194,32 @@ class Runner:
         plan_file: str,
         config: Config | None = None,
     ) -> None:
-        # ... (MVP0 init) ...
-        self.persona_registry = PersonaRegistry(self.disk.sora_dir / "prompts")
+        # ... (MVP0 init — no persona_registry) ...
 
     async def run(self) -> None:
         """Main entry point. Unchanged structure from MVP0 but calls _execute_v1."""
         ...
 
     async def _execute_v1(self, state: AgentState) -> None:
-        """MVP1 execution cycle.
+        """MVP1 execution cycle — single executor with reflexion on failure.
 
-        Phase 1: HARDENING
-            Plan Hardening convergence loop.
+        1. Read plan from state.plan_file
+        2. Execute plan with executor provider (single call — no task splitting)
+        3. On failure: inject failure context (Reflexion) → retry
+        4. After max retries → FAILED → notify
+        5. Success → COMPLETED → notify
 
-        Phase 2: EXECUTION
-            For each task: Builder → Verifier → Reflexion loop.
-
-        Phase 3: COMPLETION
-            Write final report, notify.
+        NOTE: Plan hardening, Builder/Verifier roles, persona loading, task
+        splitting, and context assembly are all deferred — not in MVP1.
         """
         ...
 
-    async def _phase_hardening(self, plan_content: str) -> str:
-        """Run Plan Hardening. Returns the hardened plan."""
-        ...
+    async def _execute_with_reflexion(self, plan: str, state: AgentState) -> str:
+        """Execute plan with the executor provider, retrying on failure with
+        Reflexion context injected into each retry attempt.
 
-    async def _phase_execution(self, hardened_plan: str, state: AgentState) -> None:
-        """Execute all tasks from the hardened plan.
-
-        Parses the plan into tasks, then runs Builder+Verifier on each.
-        """
-        ...
-
-    async def _execute_task(
-        self,
-        task_plan: str,
-        task_id: str,
-        previous_summaries: list[str],
-        state: AgentState,
-    ) -> str:
-        """Execute a single task with Builder+Verifier+Reflexion.
-
-        Returns the task summary on success.
-        Raises TaskFailedError after all retries exhausted.
-        """
-        ...
-
-    def _build_role_chain(self, role_name: str) -> ProviderChain:
-        """Build a ProviderChain for a specific role from config.
-
-        Reads roles.<role_name> from config:
-            provider = primary
-            fallback = [list]
-            model = override
-        """
-        ...
-
-    def _parse_tasks(self, plan: str) -> list[tuple[str, str]]:
-        """Parse a plan into task list.
-
-        Returns list of (task_id, task_content) tuples.
-
-        Parsing heuristics:
-            - Look for ### T01, ### T02, etc. (Architect format)
-            - Look for ## Task 1, ## Task 2, etc.
-            - Look for numbered sections
-            - Fallback: entire plan = single task
+        Returns executor output string on success.
+        Raises RunnerError after max retries exhausted.
         """
         ...
 ```
@@ -1338,174 +1228,102 @@ class Runner:
 
 ```
 _execute_v1(state):
-    # Load personas (reviewer_review, reviewer_fix, builder, verifier)
-    persona_registry.load_all()
-
-    # Phase 1: Hardening
     # plan_file = state.plan_file (set by project_init or CLI --plan arg)
     plan = disk.read_plan(state.plan_file)
-    state.phase = Phase.HARDENING
+
+    state.phase = Phase.RUNNING
     disk.write_state(state)
-    notifier.notify("starting plan hardening", PROGRESS)
+    notifier.notify("starting execution", PROGRESS)
 
-    reviewer_chain = _build_role_chain("reviewer")
-    hardened_plan = await _phase_hardening(plan)
+    reflexion = ReflexionContext(attempts=[])
 
-    disk.write_file("milestones/M001/PLAN.md", hardened_plan)
-    notifier.notify(f"plan hardened ({result.rounds_completed} rounds)", PROGRESS)
+    for attempt in range(config.reflexion.max_cycles + 1):
+        result = await executor.run(
+            plan=plan,
+            reflexion_context=reflexion.to_prompt(),
+            working_dir=str(project_path),
+            config=config,
+        )
 
-    # Phase 2: Execution
-    tasks = _parse_tasks(hardened_plan)
-    summaries = []
-    state.phase = Phase.EXECUTING
-    disk.write_state(state)
+        if result.success:
+            break
 
-    for task_id, task_content in tasks:
-        notifier.notify(f"task {task_id}: starting", HEARTBEAT)
+        # Failure: build reflexion context for next attempt
+        reflexion = add_attempt(reflexion, result.output, result.error)
+        state = checkpoint.increment_retry(state)
+        notifier.notify(f"attempt {attempt + 1} failed, retrying", PROGRESS)
+    else:
+        state.phase = Phase.FAILED
+        state.error_message = str(result.error)
+        checkpoint.mark_failed(state)
+        notifier.notify("max retries reached — execution failed", ERROR)
+        return
 
-        summary = await _execute_task(task_content, task_id, summaries, state)
-        summaries.append(summary)
-        # Canonical summary path: milestones/M001/{task_id}-SUMMARY.md
-        disk.write_file(f"milestones/M001/{task_id}-SUMMARY.md", summary)
-
-        notifier.notify(f"task {task_id}: done", PROGRESS)
-
-    # Phase 3: Completion
+    # Success
     state.phase = Phase.COMPLETED
     checkpoint.mark_completed(state)
-    notifier.notify(f"all {len(tasks)} tasks completed", DONE)
-
-
-_execute_task(task_plan, task_id, summaries, state):
-    builder_chain = _build_role_chain("builder")
-    verifier_chain = _build_role_chain("verifier")
-    reflexion = ReflexionContext(attempts=[])
-    must_haves = extract_must_haves(task_plan)
-
-    for cycle in range(config.reflexion.max_cycles + 1):
-        # Builder
-        builder_result = await run_builder(
-            task_plan, summaries, reflexion.to_prompt(),
-            builder_chain, persona_registry, working_dir, disk, config,
-        )
-
-        if not builder_result.success:
-            # Builder itself crashed — retry without reflexion
-            state = checkpoint.increment_retry(state)
-            continue
-
-        # Verifier
-        verifier_result = await run_verifier(
-            task_plan, must_haves, verifier_chain,
-            persona_registry, working_dir, disk, config,
-        )
-
-        if verifier_result.verdict == Verdict.PASS:
-            return builder_result.summary
-
-        if verifier_result.verdict == Verdict.ANOMALY:
-            disk.append_file("persistent/EVENT_JOURNAL.md",
-                            verifier_result.anomaly_description)
-
-        # FAIL → Reflexion
-        reflexion = add_attempt(reflexion, builder_result.output, verifier_result)
-        log.warning(f"{task_id} attempt {cycle+1} failed: {verifier_result.details}")
-
-    raise TaskFailedError(task_id, config.reflexion.max_cycles + 1)
+    notifier.notify("execution completed", DONE)
 ```
 
 ---
 
 ## 6. Bundled Prompt Files
 
-These `.md` files ship with tero2 and are copied to `.sora/prompts/` on project init.
-
-### `prompts/builder.md`
-
-See `lib/system-prompts.md` → Builder section. Copy the full prompt.
-
-### `prompts/verifier.md`
-
-See `lib/system-prompts.md` → Verifier section. Copy the full prompt.
-
-### `prompts/reviewer_review.md`
-
-See `lib/system-prompts.md` → Reviewer section (Plan Review / Find Issues mode). Copy the full prompt.
-
-**Critical requirement:** The prompt must instruct the model to output a structured JSON block:
-```
-```json
-{"critical": <int>, "improvements": <int>, "issues": ["<desc>", ...]}
-```
-```
-This is required for reliable `_count_issues()` parsing.
-
-### `prompts/reviewer_fix.md`
-
-See `lib/system-prompts.md` → Reviewer section (Apply Fixes mode). Copy the full prompt.
-
-**Critical requirement:** The prompt must instruct the model to output ONLY the corrected plan
-markdown — no preamble, no commentary, no JSON wrapper. The raw output is written to disk as-is.
-
-> These are the canonical versions. MVP7 (Autoresearch) will evolve them via automated optimization.
+> **⚠️ DEFERRED — Not in MVP1.** Bundled role prompt files (builder.md, verifier.md, reviewer_review.md, reviewer_fix.md) are deferred with the persona/prompt system. Do NOT create `.sora/prompts/` or bundled `.md` prompts in MVP1.
 
 ---
 
 ## 7. Implementation Order
 
 ```
-Track A (core):                  Track B (players):         Track C (telegram):
-─────────────────                ──────────────────         ────────────────────
-1. persona.py                    4. players/builder.py      7. project_init.py
-2. context_assembly.py           5. players/verifier.py     8. telegram_input.py
-3. reflexion.py                  6. plan_hardening.py
-                              ───── MERGE ─────
-                          9. runner.py (Dispatcher v1)
-                          10. config.py updates
-                          11. bundled prompt files
-                          12. tests
+Track A (core):       Track B (telegram):
+─────────────────     ────────────────────
+1. reflexion.py       2. project_init.py
+                      3. telegram_input.py
+              ───── MERGE ─────
+          4. runner.py (Dispatcher v1 with reflexion)
+          5. config.py updates (ReflexionConfig, allowed_chat_ids)
+          6. tests
 ```
 
 | Step | Module | Depends On |
 |------|--------|------------|
-| 1 | `persona.py` | — |
-| 2 | `context_assembly.py` | config (MVP0) |
-| 3 | `reflexion.py` | — |
-| 4 | `players/builder.py` | persona, context_assembly, providers |
-| 5 | `players/verifier.py` | persona, context_assembly, providers |
-| 6 | `plan_hardening.py` | persona, context_assembly, providers |
-| 7 | `project_init.py` | disk_layer, config |
-| 8 | `telegram_input.py` | config, project_init, notifier |
-| 9 | Update `runner.py` | all above |
-| 10 | Update `config.py` | — |
-| 11 | Create `prompts/*.md` | — |
-| 12 | Tests | all above |
+| 1 | `reflexion.py` | — |
+| 2 | `project_init.py` | disk_layer, config |
+| 3 | `telegram_input.py` | config, project_init, notifier |
+| 4 | Update `runner.py` | reflexion, telegram_input, project_init |
+| 5 | Update `config.py` | — |
+| 6 | Tests | all above |
 
-Steps 1-3, 7, and 11 can run in parallel.
+Steps 1 and 2 can run in parallel.
+
+**Not implemented in MVP1 (deferred):** persona.py, context_assembly.py, plan_hardening.py, players/builder.py, players/verifier.py, bundled prompts.
 
 ---
 
 ## 8. Acceptance Criteria
 
-- [ ] Plan Hardening: give a plan with obvious flaws → 3-5 rounds → issues decrease to 0
-- [ ] Builder: receives hardened plan → writes code → produces SUMMARY.md
-- [ ] Verifier: runs `ruff check` + `pytest -x` → returns PASS/FAIL/ANOMALY
-- [ ] On FAIL → Reflexion injects failure context → Builder retry knows what failed
+- [ ] Reflexion: on executor failure → failure context injected into retry prompt
 - [ ] After max reflexion cycles → task marked FAILED → Telegram notification
-- [ ] All tasks PASS → run COMPLETED → Telegram "done" with voice
-- [ ] Telegram: send `.md` file → project created → hardening starts
-- [ ] Telegram: send text plan → project created → hardening starts
+- [ ] Run COMPLETED → Telegram "done" with voice
+- [ ] Telegram: send `.md` file → project created → executor starts
+- [ ] Telegram: send text plan → project created → executor starts
 - [ ] Only allowed `chat_id`s can interact with the bot
-- [ ] `tero2 status` shows current phase (HARDENING / EXECUTING / COMPLETED)
-- [ ] `.sora/` has: `milestones/M001/PLAN.md` (hardened), `milestones/M001/{task_id}-SUMMARY.md` per task, `runtime/STATE.json`
-- [ ] PersonaRegistry loads prompts from `.sora/prompts/*.md`
-- [ ] Context Assembly stays within budget (never exceeds 95% of model limit)
+- [ ] `tero2 status` shows current phase (RUNNING / COMPLETED / FAILED)
+- [ ] `.sora/` has: `runtime/STATE.json`, project dir scaffolded by `project_init`
 - [ ] `ruff check src/` clean, `pytest tests/` green
 
 ---
 
 ## 9. What MVP1 Does NOT Include
 
+**Deferred from original MVP1 scope:**
+- **No roles** (Builder, Verifier, Reviewer) — no specialized agent roles; executor handles everything
+- **No plan hardening** — no adversarial review rounds before execution
+- **No context assembly** — no smart prompt construction with budget control
+- **No persona/prompt system** — no `.md` role prompt files, no PersonaRegistry
+
+**Already deferred to MVP2+:**
 - **No Scout** (codebase reconnaissance) — MVP2
 - **No Architect** (auto-decomposition into Tasks) — MVP2
 - **No Coach** (strategic advisor) — MVP2
@@ -1515,7 +1333,7 @@ Steps 1-3, 7, and 11 can run in parallel.
 - **No voice input** (STT) — MVP4
 - **No parallelism** — MVP5
 
-MVP1 expects the plan to already contain tasks. If the plan has no task breakdown, the entire plan is treated as a single task. Auto-decomposition (Architect role) comes in MVP2.
+MVP1 uses the same single-executor model as MVP0. The executor receives the plan directly. Auto-decomposition (Architect role) comes in a future MVP.
 
 ---
 
@@ -1582,113 +1400,19 @@ async def run_prompt_collected(self, prompt: str) -> str:
 
 ### G3. State transitions for new phases
 
-**Gap:** `_VALID_TRANSITIONS` in `checkpoint.py` has no rules for `HARDENING` or `EXECUTING`.
-
-**Resolution:** Add these transitions to `checkpoint.py`:
-
-```python
-_VALID_TRANSITIONS: set[tuple[Phase, Phase]] = {
-    # MVP0 transitions (unchanged):
-    (Phase.IDLE, Phase.RUNNING),
-    (Phase.RUNNING, Phase.COMPLETED),
-    (Phase.RUNNING, Phase.FAILED),
-    (Phase.RUNNING, Phase.PAUSED),
-    (Phase.PAUSED, Phase.RUNNING),
-    (Phase.PAUSED, Phase.FAILED),
-    (Phase.FAILED, Phase.RUNNING),
-    (Phase.COMPLETED, Phase.RUNNING),
-
-    # MVP1 transitions:
-    (Phase.IDLE, Phase.HARDENING),        # start directly into hardening
-    (Phase.HARDENING, Phase.EXECUTING),   # hardening done -> execute tasks
-    (Phase.HARDENING, Phase.FAILED),      # hardening crashed
-    (Phase.HARDENING, Phase.PAUSED),      # human paused during hardening
-    (Phase.EXECUTING, Phase.COMPLETED),   # all tasks passed
-    (Phase.EXECUTING, Phase.FAILED),      # task exhausted retries
-    (Phase.EXECUTING, Phase.PAUSED),      # human paused during execution
-    (Phase.PAUSED, Phase.HARDENING),      # resume into hardening
-    (Phase.PAUSED, Phase.EXECUTING),      # resume into execution
-    (Phase.FAILED, Phase.HARDENING),      # re-run from hardening after failure
-}
-```
+> **⚠️ DEFERRED — Not in MVP1.** `Phase.HARDENING` and `Phase.EXECUTING` are deferred with the plan-hardening and role-decomposition systems. The `_VALID_TRANSITIONS` table in `checkpoint.py` is unchanged from MVP0. Do NOT add HARDENING or EXECUTING transitions in MVP1.
 
 ---
 
 ### G4. AgentState fields for MVP1 tracking
 
-**Gap:** `AgentState` has no fields for tracking hardening round or current task.
-
-**Resolution:** Add these fields to `AgentState`:
-
-```python
-@dataclass
-class AgentState:
-    phase: Phase = Phase.IDLE
-    current_task: str = ""
-    current_task_index: int = 0       # NEW -- 0-indexed task being executed
-    total_tasks: int = 0              # NEW -- total task count from parsed plan
-    hardening_round: int = 0          # NEW -- current hardening round (1-indexed during hardening, 0 when not)
-    hardening_max_rounds: int = 0     # NEW -- max rounds (from config, for display)
-    retry_count: int = 0
-    steps_in_task: int = 0
-    last_checkpoint: str = ""
-    provider_index: int = 0
-    started_at: str = ""
-    updated_at: str = ""
-    error_message: str = ""
-    plan_file: str = ""
-```
-
-Display mapping for `tero2 status`:
-- `Phase.HARDENING` -> `"HARDENING (round {hardening_round}/{hardening_max_rounds})"`
-- `Phase.EXECUTING` -> `"EXECUTING (task {current_task_index + 1}/{total_tasks})"`
-- Other phases -> unchanged from MVP0
+> **⚠️ DEFERRED — Not in MVP1.** Fields for `hardening_round`, `hardening_max_rounds`, `current_task_index`, and `total_tasks` are deferred with the plan-hardening and multi-task execution systems. `AgentState` is unchanged from MVP0 for MVP1. The HARDENING and EXECUTING display mappings for `tero2 status` are likewise deferred.
 
 ---
 
 ### G5. CheckpointManager methods for new phases
 
-**Gap:** No `mark_hardening()` or `mark_executing()` methods.
-
-**Resolution:** Add to `checkpoint.py`:
-
-```python
-def mark_hardening(self, state: AgentState, max_rounds: int) -> AgentState:
-    """Transition to HARDENING phase."""
-    state = self._transition(state, Phase.HARDENING)
-    state.hardening_round = 0
-    state.hardening_max_rounds = max_rounds
-    state.touch()
-    self.save(state)
-    return state
-
-def update_hardening_round(self, state: AgentState, round_num: int) -> AgentState:
-    """Update the current hardening round number."""
-    state.hardening_round = round_num
-    state.touch()
-    self.save(state)
-    return state
-
-def mark_executing(self, state: AgentState, total_tasks: int) -> AgentState:
-    """Transition to EXECUTING phase."""
-    state = self._transition(state, Phase.EXECUTING)
-    state.current_task_index = 0
-    state.total_tasks = total_tasks
-    state.hardening_round = 0  # clear hardening state
-    state.touch()
-    self.save(state)
-    return state
-
-def advance_task(self, state: AgentState, task_id: str) -> AgentState:
-    """Move to the next task in execution."""
-    state.current_task = task_id
-    state.current_task_index += 1
-    state.retry_count = 0
-    state.steps_in_task = 0
-    state.touch()
-    self.save(state)
-    return state
-```
+> **⚠️ DEFERRED — Not in MVP1.** `mark_hardening()`, `update_hardening_round()`, `mark_executing()`, and `advance_task()` are all deferred with plan hardening and multi-task execution. No new checkpoint methods are added in MVP1.
 
 ---
 
@@ -1827,55 +1551,7 @@ def _parse_verdict(output: str) -> tuple[Verdict, str]:
 
 ### G10. `_parse_tasks()` algorithm
 
-**Gap:** Parsing heuristics too vague -- no regex, no priority.
-
-**Resolution:**
-
-```python
-import re
-
-# Priority 1: ### T01 -- Title\ncontent (Architect format)
-_TASK_ARCH_RE = re.compile(
-    r"^###\s+(T\d+)\s*[-]+\s*(.*?)(?=^###\s+T\d+|\Z)",
-    re.MULTILINE | re.DOTALL,
-)
-
-# Priority 2: ## Task 1: Title\ncontent
-_TASK_HEADING_RE = re.compile(
-    r"^##\s+Task\s+(\d+)[:\s]*(.*?)(?=^##\s+Task\s+\d+|\Z)",
-    re.MULTILINE | re.DOTALL,
-)
-
-# Priority 3: Numbered sections -- "1. Title\n   content" (top-level only)
-_TASK_NUMBERED_RE = re.compile(
-    r"^(\d+)\.\s+(.*?)(?=^\d+\.\s|\Z)",
-    re.MULTILINE | re.DOTALL,
-)
-
-def _parse_tasks(self, plan: str) -> list[tuple[str, str]]:
-    """Parse plan into (task_id, task_content) tuples.
-
-    Tries patterns in priority order. First pattern that yields >= 1 match wins.
-    Fallback: entire plan = single task with id "T01".
-    """
-    # Priority 1: Architect format (### T01 -- ...)
-    matches = _TASK_ARCH_RE.findall(plan)
-    if matches:
-        return [(tid.strip(), content.strip()) for tid, content in matches]
-
-    # Priority 2: ## Task N: ...
-    matches = _TASK_HEADING_RE.findall(plan)
-    if matches:
-        return [(f"T{int(num):02d}", content.strip()) for num, content in matches]
-
-    # Priority 3: numbered list
-    matches = _TASK_NUMBERED_RE.findall(plan)
-    if matches:
-        return [(f"T{int(num):02d}", content.strip()) for num, content in matches]
-
-    # Fallback: whole plan is one task
-    return [("T01", plan.strip())]
-```
+> **⚠️ DEFERRED — Not in MVP1.** Multi-task plan parsing (`_parse_tasks()`) is deferred with the multi-task execution loop. MVP1 passes the entire plan to the single executor as one unit — no task splitting required.
 
 ---
 
@@ -2076,6 +1752,8 @@ async def _launch_runner(self, project_path: Path) -> None:
 
 ### G16. `_build_role_chain()` vs `_build_chain()` migration
 
+> **⚠️ NOT YET IMPLEMENTED** — `runner.py` still uses `_build_chain(start_index)`. The rename to `_build_role_chain(role_name)` has not been applied.
+
 **Gap:** MVP0 has `_build_chain()` hardcoded to "executor". MVP1 adds `_build_role_chain(role_name)`.
 
 **Resolution:** `_build_role_chain()` replaces `_build_chain()`. The old method is removed.
@@ -2112,6 +1790,8 @@ The old `_build_chain()` is deleted. MVP0 behavior is preserved because `_build_
 ---
 
 ### G17. CLI `telegram` command
+
+> **⚠️ NOT YET IMPLEMENTED** — `cli.py` does not have a `telegram` subcommand. `telegram_input.py` is not yet implemented.
 
 **Gap:** No CLI subcommand to start the Telegram input bot.
 
@@ -2168,6 +1848,8 @@ async def _poll_once(self, offset: int) -> tuple[list[dict], int]:
 
 ### G19. DiskLayer helpers for MVP1 paths
 
+> **⚠️ NOT YET IMPLEMENTED** — `write_plan_version()`, `write_task_summary()`, `write_hardened_plan()` are not in `disk_layer.py`.
+
 **Gap:** No path construction helpers for versioned plans and task summaries.
 
 **Resolution:** Add convenience methods to `DiskLayer`. Thin wrappers over `write_file()`:
@@ -2192,69 +1874,13 @@ def write_hardened_plan(self, milestone: str, content: str) -> None:
 
 ### G20. Bundled prompt file location
 
-**Gap:** Where do default prompt files live in the package?
-
-**Resolution:** Bundled prompts live at `tero2/prompts/` (package-relative). This directory is created during development, NOT at runtime.
-
-```
-tero2/
-  prompts/                     # bundled defaults (shipped with package)
-    builder.md
-    verifier.md
-    reviewer_review.md
-    reviewer_fix.md
-```
-
-`project_init.py`'s `copy_default_prompts()` copies from this location:
-
-```python
-def copy_default_prompts(sora_prompts_dir: Path) -> None:
-    """Copy bundled defaults to .sora/prompts/. No overwrite."""
-    bundled_dir = Path(__file__).parent / "prompts"
-    if not bundled_dir.is_dir():
-        log.warning(f"bundled prompts not found at {bundled_dir}")
-        return
-    for src_file in bundled_dir.glob("*.md"):
-        dest = sora_prompts_dir / src_file.name
-        if not dest.exists():
-            dest.write_text(src_file.read_text(encoding="utf-8"), encoding="utf-8")
-```
+> **⚠️ DEFERRED — Not in MVP1.** Bundled role prompt files (`builder.md`, `verifier.md`, etc.) and `copy_default_prompts()` are deferred with the persona/prompt and role-decomposition systems. Do NOT create a `prompts/` directory or any bundled prompt `.md` files in MVP1.
 
 ---
 
 ### G21. Config parsing for new sections
 
-**Gap:** `_parse_config()` doesn't parse `[plan_hardening]`, `[context]`, `[reflexion]`, or `allowed_chat_ids`.
-
-**Resolution:** Add to `_parse_config()` in `tero2/config.py`:
-
-```python
-# After existing telegram parsing, add allowed_chat_ids:
-# cfg.telegram.allowed_chat_ids = tg.get("allowed_chat_ids", [])
-
-# New sections:
-ph = raw.get("plan_hardening", {})
-if ph:
-    cfg.plan_hardening = PlanHardeningConfig(
-        max_rounds=ph.get("max_rounds", 5),
-        stop_on_cosmetic_only=ph.get("stop_on_cosmetic_only", True),
-    )
-
-ctx = raw.get("context", {})
-if ctx:
-    cfg.context = ContextConfig(
-        target_ratio=ctx.get("target_ratio", 0.70),
-        warning_ratio=ctx.get("warning_ratio", 0.80),
-        hard_fail_ratio=ctx.get("hard_fail_ratio", 0.95),
-        optimal_builder_tokens=ctx.get("optimal_builder_tokens", 15_000),
-    )
-
-refl = raw.get("reflexion", {})
-if refl:
-    cfg.reflexion = ReflexionConfig(
-        max_cycles=refl.get("max_cycles", 2),
-    )
-```
+> **⚠️ DEFERRED (partial) — Not in MVP1.** `[plan_hardening]` and `[context]` config sections are deferred with plan hardening and context assembly. Only `[reflexion]` (max_cycles) and `allowed_chat_ids` are MVP1 scope — see the `config.py` spec in Section 5 for the precise `_parse_config()` additions.
 
 ---
 
@@ -2270,11 +1896,7 @@ if refl:
 
 **Gap:** How does the runner decide between MVP0 `_execute_plan()` and MVP1 `_execute_v1()`?
 
-**Resolution:** MVP1 replaces `_execute_plan()`. The runner's `run()` method calls `_execute_v1()` instead. MVP0 behavior is a degenerate case of MVP1:
-
-- If no `[plan_hardening]` config or `max_rounds == 0` -> hardening is skipped
-- If plan has no task markers -> `_parse_tasks()` fallback produces a single task
-- If no `[roles.builder]` -> `_build_role_chain("builder")` falls back to `"executor"`
+**Resolution:** MVP1 replaces `_execute_plan()`. The runner's `run()` method calls `_execute_v1()` instead. MVP0 behavior is fully preserved because MVP1 uses the same single-executor + reflexion loop — it just adds the Telegram interrupt check and improved error handling around it.
 
 This means MVP0 configs work unchanged with the MVP1 runner.
 
@@ -2282,83 +1904,69 @@ This means MVP0 configs work unchanged with the MVP1 runner.
 
 ### G24. `_execute_v1` pseudocode with error handling (complete)
 
-Replaces the pseudocode in Section 5.9 with full error handling:
+Replaces the pseudocode in Section 5.9 with full error handling.
+
+**MVP1 scope:** single executor + reflexion loop. No persona loading, no plan hardening, no task splitting — those are deferred.
 
 ```python
 async def _execute_v1(self, state: AgentState) -> None:
-    self.persona_registry.load_all()
-
+    # NOTE: no persona_registry.load_all() — persona system is deferred
     plan = self.disk.read_plan(state.plan_file)
     if not plan or not plan.strip():
         state = self.checkpoint.mark_failed(state, "plan file is empty or missing")
+        self._current_state = state
         await self.notifier.notify("failed -- empty plan", NotifyLevel.ERROR)
         return
 
-    # Phase 1: Hardening (skipped if max_rounds == 0)
-    hardening_cfg = self.config.plan_hardening
-    if hardening_cfg.max_rounds > 0:
-        state = self.checkpoint.mark_hardening(state, hardening_cfg.max_rounds)
-        self._current_state = state
-        await self.notifier.notify("starting plan hardening", NotifyLevel.PROGRESS)
-        try:
-            hardened_plan = await self._phase_hardening(plan, state)
-        except Exception as exc:
-            state = self.checkpoint.mark_failed(state, f"hardening failed: {exc}")
-            self._current_state = state
-            await self.notifier.notify(f"hardening crashed: {exc}", NotifyLevel.ERROR)
-            return
-    else:
-        hardened_plan = plan
-
-    self.disk.write_hardened_plan("M001", hardened_plan)
-
-    # Phase 2: Execution
-    tasks = self._parse_tasks(hardened_plan)
-    if not tasks:
-        state = self.checkpoint.mark_failed(state, "no tasks found in plan")
-        await self.notifier.notify("failed -- no tasks in plan", NotifyLevel.ERROR)
-        return
-
-    state = self.checkpoint.mark_executing(state, len(tasks))
+    # Transition to RUNNING (Phase.RUNNING is the only execution phase in MVP1)
+    state = self.checkpoint.mark_running(state)
     self._current_state = state
-    summaries: list[str] = []
+    await self.notifier.notify("starting execution", NotifyLevel.PROGRESS)
 
-    for i, (task_id, task_content) in enumerate(tasks):
-        state = self.checkpoint.advance_task(state, task_id)
+    reflexion = ReflexionContext(attempts=[])
+
+    for attempt in range(self.config.reflexion.max_cycles + 1):
+        # Check for OVERRIDE.md (PAUSE/STOP) between attempts
+        override = self.disk.read_override()
+        if override:
+            await self._handle_override(override, state)
+            return
+
+        try:
+            result = await self.executor.run(
+                plan=plan,
+                reflexion_context=reflexion.to_prompt(),
+                working_dir=str(self.project_path),
+                config=self.config,
+            )
+        except Exception as exc:
+            state = self.checkpoint.mark_failed(state, f"executor crashed: {exc}")
+            self._current_state = state
+            await self.notifier.notify(f"executor crashed: {exc}", NotifyLevel.ERROR)
+            return
+
+        if result.success:
+            state = self.checkpoint.mark_completed(state)
+            self._current_state = state
+            await self.notifier.notify("execution complete", NotifyLevel.DONE)
+            return
+
+        # Failure → add to reflexion context and retry
+        reflexion = add_attempt(reflexion, result.output, result.error)
+        state = self.checkpoint.increment_retry(state)
         self._current_state = state
         await self.notifier.notify(
-            f"task {task_id} ({i+1}/{len(tasks)}): starting", NotifyLevel.HEARTBEAT
+            f"attempt {attempt + 1} failed, retrying", NotifyLevel.PROGRESS
         )
 
-        try:
-            summary = await self._execute_task(task_content, task_id, summaries, state)
-        except TaskFailedError:
-            state = self.checkpoint.mark_failed(
-                state, f"task {task_id} exhausted all retries"
-            )
-            self._current_state = state
-            await self.notifier.notify(
-                f"task {task_id} failed after all retries", NotifyLevel.ERROR
-            )
-            return
-
-        summaries.append(summary)
-        self.disk.write_task_summary("M001", task_id, summary)
-        await self.notifier.notify(f"task {task_id}: done", NotifyLevel.PROGRESS)
-
-    # Phase 3: Completion
-    state = self.checkpoint.mark_completed(state)
+    # All attempts exhausted
+    state = self.checkpoint.mark_failed(state, "max reflexion cycles exhausted")
     self._current_state = state
-    await self.notifier.notify(f"all {len(tasks)} tasks completed", NotifyLevel.DONE)
+    await self.notifier.notify("failed -- max retries exhausted", NotifyLevel.ERROR)
 ```
 
 ---
 
 ### G25. `players/__init__.py`
 
-Trivial but necessary:
-
-```python
-# tero2/players/__init__.py
-"""Player modules -- Builder and Verifier agents."""
-```
+> **⚠️ DEFERRED — Not in MVP1.** The `players/` package (Builder, Verifier agents) is deferred with the role-decomposition system. Do NOT create a `players/` directory or any player modules in MVP1.
