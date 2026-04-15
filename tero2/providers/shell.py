@@ -1,0 +1,38 @@
+"""Shell provider — runs commands via subprocess."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Any
+
+from tero2.errors import ProviderError
+from tero2.providers.base import BaseProvider
+
+log = logging.getLogger(__name__)
+
+
+class ShellProvider(BaseProvider):
+    @property
+    def display_name(self) -> str:
+        return "shell"
+
+    @property
+    def command(self) -> str:
+        return "bash"
+
+    async def run(self, **kwargs: Any) -> Any:
+        prompt = kwargs.get("prompt", "")
+        proc = await asyncio.create_subprocess_exec(
+            "bash",
+            "-c",
+            prompt,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            err_msg = stderr.decode(errors="replace").strip()
+            log.error("shell provider exited %d: %s", proc.returncode, err_msg)
+            raise ProviderError(f"shell exited {proc.returncode}: {err_msg}")
+        yield stdout.decode(errors="replace")
