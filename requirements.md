@@ -262,21 +262,21 @@ git commit -m "add run_prompt_collected to ProviderChain"
 ### Task 3: Verify and commit `stuck_detection.py`
 
 **Files:**
-- [ ] Verify: `tero2/stuck_detection.py` (already in working tree, unstaged)
-- [ ] Test: `tests/test_stuck_and_escalation.py` (already exists — comprehensive, Parts 1+4)
+- [x] Verify: `tero2/stuck_detection.py` (already in working tree, unstaged)
+- [x] Test: `tests/test_stuck_and_escalation.py` (already exists — comprehensive, Parts 1+4)
 
 > `tests/test_stuck_and_escalation.py` already exists with 35+ tests covering stuck detection, escalation, and runner integration. Do NOT create a new `test_stuck_detection.py` file — use the existing one.
 
-- [ ] **Step 1: Read `tero2/stuck_detection.py` and verify against spec**
+- [x] **Step 1: Read `tero2/stuck_detection.py` and verify against spec**
 
 Key interface to verify:
-- [ ] `StuckSignal` enum: NONE, RETRY_EXHAUSTED, STEP_LIMIT, TOOL_REPEAT
-- [ ] `StuckResult` dataclass: signal, details, severity
-- [ ] `check_stuck(state, config)` → StuckResult (priority: RETRY > STEP > TOOL)
-- [ ] `compute_tool_hash(tool_call)` → 16-char hex (SHA-256[:16])
-- [ ] `update_tool_hash(state, tool_call)` → (state, is_repeat)
+- [x] `StuckSignal` enum: NONE, RETRY_EXHAUSTED, STEP_LIMIT, TOOL_REPEAT
+- [x] `StuckResult` dataclass: signal, details, severity
+- [x] `check_stuck(state, config)` → StuckResult (priority: RETRY > STEP > TOOL)
+- [x] `compute_tool_hash(tool_call)` → 16-char hex (SHA-256[:16])
+- [x] `update_tool_hash(state, tool_call)` → (state, is_repeat)
 
-- [ ] **Step 2: Run existing tests for stuck detection (Part 1)**
+- [x] **Step 2: Run existing tests for stuck detection (Part 1)**
 
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/test_stuck_and_escalation.py -k "TestStuckDetection" -v`
 Expected: All PASS

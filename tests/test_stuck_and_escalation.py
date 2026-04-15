@@ -196,6 +196,15 @@ class TestStuckDetectionToolRepeat:
         assert not is_repeat
         assert state.tool_repeat_count == 0
 
+    def test_two_identical_calls_trigger_tool_repeat(self) -> None:
+        """Integrated: two identical update_tool_hash calls → check_stuck returns TOOL_REPEAT."""
+        state = AgentState()
+        state, _ = update_tool_hash(state, "read_file(path=foo.py)")
+        state, _ = update_tool_hash(state, "read_file(path=foo.py)")
+        result = check_stuck(state, StuckDetectionConfig(tool_repeat_threshold=2))
+        assert result.signal == StuckSignal.TOOL_REPEAT
+        assert result.severity == 2
+
     def test_retry_exhausted_takes_priority_over_step_limit(self) -> None:
         state = AgentState(retry_count=5, steps_in_task=20)
         result = check_stuck(state, StuckDetectionConfig(max_retries=3, max_steps_per_task=15))
@@ -513,8 +522,12 @@ class TestRunnerStuckEscalation:
 
         state = disk.read_state()
         stuck_notified = [t for t, lvl in notified if lvl == NotifyLevel.STUCK]
-        # State should be paused (Level 3) or failed (all retries consumed)
-        assert state.phase in (Phase.PAUSED, Phase.FAILED)
+        # Strict assertion: escalation must have reached Level 3 (PAUSED).
+        # Phase.FAILED would mean the escalation pipeline was never invoked.
+        assert state.phase == Phase.PAUSED, (
+            f"expected Level 3 escalation (PAUSED) but got phase={state.phase}, "
+            f"escalation_level={state.escalation_level}, notified={notified}"
+        )
         # At least one stuck-level notification should have been sent
         assert stuck_notified, f"expected stuck notification, got: {notified}"
 
@@ -570,4 +583,44 @@ class TestRunnerStuckEscalation:
 
         report = disk.read_file("human/STUCK_REPORT.md")
         assert report, "STUCK_REPORT.md should have been written"
+        assert "Stuck Report" in report
+
+    async def test_retry_max_equals_stuck_max_triggers_level3(self, tmp_path: Path) -> None:
+        """Boundary: retry.max_retries == stuck_detection.max_retries.
+
+        When both thresholds are equal, RETRY_EXHAUSTED only fires *after* the loop
+        (the in-loop check at attempt>0 never sees retry_count == max_retries because
+        increment_retry runs *after* a failed attempt).  The post-loop escalation path
+        must catch this and escalate to Level 3, not silently call mark_failed.
+        """
+        project, plan, config, disk = _make_project(tmp_path)
+        config.retry.max_retries = 3
+        config.retry.chain_retry_wait_s = 0
+        config.reflexion.max_cycles = 2
+        config.stuck_detection = StuckDetectionConfig(
+            max_retries=3,  # == retry.max_retries → RETRY_EXHAUSTED only fires post-loop
+            max_steps_per_task=15,
+            tool_repeat_threshold=2,
+        )
+        config.escalation = EscalationConfig(
+            diversification_max_steps=2,
+            backtrack_to_last_checkpoint=True,
+        )
+
+        runner = Runner(project, plan, config=config)
+        runner.notifier.notify = _noop_notify  # type: ignore[method-assign]
+
+        with patch.object(runner, "_build_chain", return_value=_AlwaysFailChain()):
+            await runner.run()
+
+        state = disk.read_state()
+        # Strict Level 3 assertion: must be PAUSED, not FAILED.
+        # Phase.FAILED here would prove the post-loop escalation path is missing.
+        assert state.phase == Phase.PAUSED, (
+            f"expected Level 3 (PAUSED) but got phase={state.phase}, "
+            f"escalation_level={state.escalation_level}"
+        )
+        # STUCK_REPORT.md is a Level 3 artifact — it must exist
+        report = disk.read_file("human/STUCK_REPORT.md")
+        assert report, "STUCK_REPORT.md must be written when Level 3 is reached"
         assert "Stuck Report" in report

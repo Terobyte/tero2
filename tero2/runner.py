@@ -18,6 +18,7 @@ from tero2.constants import EXIT_LOCK_HELD, HARD_TIMEOUT_S
 from tero2.disk_layer import DiskLayer
 from tero2.errors import LockHeldError, RateLimitError
 from tero2.escalation import (
+    EscalationAction,
     EscalationLevel,
     decide_escalation,
     execute_escalation,
@@ -207,6 +208,28 @@ class Runner:
             state = self.checkpoint.increment_retry(state)
             self._current_state = state
             log.warning(f"attempt {attempt + 1} failed, retrying...")
+
+        # Post-loop: check if RETRY_EXHAUSTED fires now that retry_count has been
+        # incremented past the stuck threshold. When retry.max_retries ==
+        # stuck_detection.max_retries the in-loop check never sees this state, so we
+        # must catch it here before falling through to mark_failed. All retries are gone
+        # at this point, so Level 1/2 recovery is impossible — go straight to Level 3.
+        stuck = check_stuck(state, self.config.stuck_detection)
+        if stuck.signal != StuckSignal.NONE:
+            action = EscalationAction(level=EscalationLevel.HUMAN, should_pause=True)
+            self._escalation_history.append(EscalationLevel.HUMAN)
+            state = await execute_escalation(
+                action,
+                state,
+                self.disk,
+                self.notifier,
+                self.checkpoint,
+                stuck_result=stuck,
+                escalation_history=self._escalation_history,
+            )
+            self._current_state = state
+            self._escalation_level = EscalationLevel.HUMAN
+            return  # Phase.PAUSED — waiting for human input
 
         state = self.checkpoint.mark_failed(state, "all retries exhausted")
         self._current_state = state

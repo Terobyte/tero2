@@ -62,7 +62,7 @@ def check_stuck(state: AgentState, config: StuckDetectionConfig) -> StuckResult:
             ),
             severity=2,
         )
-    if state.tool_repeat_count >= config.tool_repeat_threshold:
+    if state.tool_repeat_count > 0 and state.tool_repeat_count >= config.tool_repeat_threshold - 1:
         return StuckResult(
             signal=StuckSignal.TOOL_REPEAT,
             details=(
