@@ -24,6 +24,27 @@ def _is_recoverable_error(exc: BaseException) -> bool:
     )
 
 
+# Context window sizes for known models (same table as zai.py).
+_MODEL_CONTEXT_WINDOWS: dict[str, int] = {
+    "glm": 128_000,
+    "deepseek": 128_000,
+    "qwen": 128_000,
+    "mimo": 128_000,
+    "claude": 200_000,
+    "gpt-4": 128_000,
+    "gemini": 1_000_000,
+}
+
+
+def get_model_context_limit(model: str) -> int:
+    """Return context window size for a model string. Default: 128_000."""
+    model_lower = model.lower()
+    for key, limit in _MODEL_CONTEXT_WINDOWS.items():
+        if key in model_lower:
+            return limit
+    return 128_000
+
+
 class ProviderChain:
     def __init__(
         self,
@@ -84,3 +105,26 @@ class ProviderChain:
     async def run_prompt(self, prompt: str) -> AsyncGenerator[Any, None]:
         async for msg in self.run(prompt=prompt):
             yield msg
+
+    async def run_prompt_collected(self, prompt: str) -> str:
+        """Send a single assembled prompt and return the full response as a string.
+
+        Used by plan_hardening, builder, verifier -- all of which assemble
+        a single prompt document via assemble_context() and expect a string back.
+
+        Internally calls run_prompt() (AsyncGenerator) and collects all text content.
+        """
+        parts: list[str] = []
+        async for msg in self.run_prompt(prompt):
+            if isinstance(msg, str):
+                parts.append(msg)
+            elif isinstance(msg, dict):
+                content = msg.get("content", "") or msg.get("text", "")
+                if content:
+                    parts.append(str(content))
+            else:
+                # Object with .content or .text attribute
+                text = getattr(msg, "content", None) or getattr(msg, "text", None)
+                if text:
+                    parts.append(str(text))
+        return "\n".join(parts)
