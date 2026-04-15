@@ -462,7 +462,7 @@ def add_attempt(
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/test_reflexion.py -v`
 Expected: All 5 tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tero2/reflexion.py tests/test_reflexion.py
@@ -474,10 +474,10 @@ git commit -m "add reflexion module for failure context injection"
 ### Task 6: Create `project_init.py`
 
 **Files:**
-- [ ] Create: `tero2/project_init.py`
-- [ ] Test: `tests/test_project_init.py`
+- [x] Create: `tero2/project_init.py`
+- [x] Test: `tests/test_project_init.py`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```python
 # tests/test_project_init.py
@@ -527,12 +527,12 @@ def test_init_project_git_init(tmp_path):
     assert (path / ".git").exists()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/test_project_init.py -v`
 Expected: ImportError
 
-- [ ] **Step 3: Implement project_init.py**
+- [x] **Step 3: Implement project_init.py**
 
 ```python
 # tero2/project_init.py
@@ -583,11 +583,11 @@ def _extract_project_name(plan: str) -> str:
     return "unnamed-project"
 ```
 
-- [ ] **Step 4: Ensure Config has `projects_dir` field**
+- [x] **Step 4: Ensure Config has `projects_dir` field**
 
 Check `tero2/config.py` — add `projects_dir: str = ""` to `Config` if missing.
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/test_project_init.py -v`
 Expected: All 6 tests PASS
