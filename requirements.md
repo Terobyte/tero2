@@ -990,11 +990,11 @@ git commit -m "integrate reflexion into runner retry loop"
 ### Task 9: Add `telegram` CLI subcommand
 
 **Files:**
-- [ ] Modify: `tero2/cli.py`
+- [x] Modify: `tero2/cli.py`
 
-- [ ] **Step 1: Read current cli.py structure**
+- [x] **Step 1: Read current cli.py structure**
 
-- [ ] **Step 2: Add telegram subcommand**
+- [x] **Step 2: Add telegram subcommand**
 
 ```python
 def cmd_telegram(args) -> None:
@@ -1018,11 +1018,11 @@ sub_telegram.add_argument("--project", help="Project path", default=None)
 sub_telegram.set_defaults(func=cmd_telegram)
 ```
 
-- [ ] **Step 3: Lint check**
+- [x] **Step 3: Lint check**
 
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && ruff check tero2/cli.py`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tero2/cli.py

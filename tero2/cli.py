@@ -105,10 +105,13 @@ def cmd_telegram(args: argparse.Namespace) -> None:
 
     from tero2.config import load_config
 
-    config = load_config(Path.cwd())
+    project_path = Path(args.project or ".").expanduser().resolve()
+    config = load_config(project_path)
     if not config.telegram or not config.telegram.bot_token:
         print("error: telegram bot_token not configured")
         sys.exit(1)
+    if not config.telegram.allowed_chat_ids:
+        print("warning: telegram.allowed_chat_ids is empty — all senders accepted")
 
     from tero2.telegram_input import TelegramInputBot
 
@@ -142,6 +145,7 @@ def _build_parser() -> argparse.ArgumentParser:
     init_parser.set_defaults(func=cmd_init)
 
     telegram_parser = subparsers.add_parser("telegram", help="Start Telegram plan-input bot")
+    telegram_parser.add_argument("--project", help="Project path (default: cwd)", default=None)
     telegram_parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
     telegram_parser.set_defaults(func=cmd_telegram)
 
