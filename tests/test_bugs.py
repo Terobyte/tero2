@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from tero2.circuit_breaker import CircuitBreakerRegistry
-from tero2.config import Config, RoleConfig, TelegramConfig, _parse_config
+from tero2.config import Config, RoleConfig, TelegramConfig
 from tero2.disk_layer import DiskLayer
 from tero2.errors import ProviderError, RateLimitError
 from tero2.providers.base import BaseProvider
@@ -121,7 +121,7 @@ class _AlwaysFailChain:
 
     async def run_prompt(self, prompt: str):
         raise RateLimitError("always fail")
-        yield  # noqa: unreachable — make this async generator
+        yield  # unreachable — make this async generator
 
 
 # ── Bug 7: max_steps_per_task RuntimeError causes infinite crash loop ──

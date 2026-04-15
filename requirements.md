@@ -978,7 +978,7 @@ Expected: PASS
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/ -v`
 Expected: All PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tero2/runner.py tero2/reflexion.py tests/test_runner_reflexion.py
@@ -1022,7 +1022,7 @@ sub_telegram.set_defaults(func=cmd_telegram)
 
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && ruff check tero2/cli.py`
 
-- [x] **Step 4: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add tero2/cli.py

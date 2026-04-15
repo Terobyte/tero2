@@ -12,11 +12,9 @@ Covers acceptance criteria:
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
-import pytest
 
 from tero2.config import Config, EscalationConfig, RoleConfig, StuckDetectionConfig, TelegramConfig
 from tero2.disk_layer import DiskLayer
@@ -29,7 +27,6 @@ from tero2.escalation import (
     write_stuck_report,
 )
 from tero2.notifier import NotifyLevel
-from tero2.providers.base import BaseProvider
 from tero2.runner import Runner
 from tero2.state import AgentState, Phase
 from tero2.stuck_detection import (
@@ -307,7 +304,6 @@ class TestExecuteEscalationLevel1:
         from tero2.checkpoint import CheckpointManager
         from tero2.notifier import Notifier
 
-        cfg = _make_config()
         notifier = Notifier(TelegramConfig())
         checkpoint = CheckpointManager(disk)
         state = AgentState(phase=Phase.RUNNING)

@@ -111,7 +111,7 @@ def cmd_telegram(args: argparse.Namespace) -> None:
         print("error: telegram bot_token not configured")
         sys.exit(1)
     if not config.telegram.allowed_chat_ids:
-        print("warning: telegram.allowed_chat_ids is empty — all senders accepted")
+        print("warning: telegram.allowed_chat_ids is empty — bot will ignore all messages")
 
     from tero2.telegram_input import TelegramInputBot
 

@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import time
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from tero2.circuit_breaker import CBState, CircuitBreaker, CircuitBreakerRegistry
 from tero2.errors import (
     CircuitOpenError,
-    ProviderNotReadyError,
     RateLimitError,
 )
 from tero2.providers.base import BaseProvider
@@ -390,7 +389,7 @@ class TestStep3CircuitBreakerHalfOpenRecovery:
 class TestStep4TelegramStartedMessage:
     async def test_runner_sends_started_on_run(self, tmp_path):
         """Runner calls notifier.notify('started', ...) before executing the plan."""
-        from unittest.mock import AsyncMock, patch
+        from unittest.mock import patch
 
         from tero2.config import Config, RoleConfig, TelegramConfig
         from tero2.runner import Runner

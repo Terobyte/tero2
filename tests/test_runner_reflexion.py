@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -44,7 +43,7 @@ class _CapturingChain:
     async def run_prompt(self, prompt: str):
         self.received_prompts.append(prompt)
         raise RateLimitError("fail for test")
-        yield  # noqa: unreachable — make this async generator
+        yield  # unreachable — make this async generator
 
 
 class TestRunnerReflexionIntegration:
