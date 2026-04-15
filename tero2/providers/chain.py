@@ -31,6 +31,9 @@ _MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     "qwen": 128_000,
     "mimo": 128_000,
     "claude": 200_000,
+    "sonnet": 200_000,
+    "opus": 200_000,
+    "haiku": 200_000,
     "gpt-4": 128_000,
     "gemini": 1_000_000,
 }

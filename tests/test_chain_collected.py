@@ -136,6 +136,10 @@ class TestGetModelContextLimit:
         [
             ("claude-3-opus", 200_000),
             ("claude-3-5-sonnet-20241022", 200_000),
+            # Bare Claude aliases used by this repo's CLI provider (default_model = "sonnet")
+            ("sonnet", 200_000),
+            ("opus", 200_000),
+            ("haiku", 200_000),
             ("gemini-1.5-pro", 1_000_000),
             ("gemini-2.0-flash", 1_000_000),
             ("gpt-4o", 128_000),
