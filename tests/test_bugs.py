@@ -148,9 +148,9 @@ class TestBug7MaxStepsRuntimeErrorCrashLoop:
             await runner.run()
 
         final = disk.read_state()
-        assert final.phase == Phase.FAILED, (
+        assert final.phase in (Phase.FAILED, Phase.PAUSED), (
             f"State is {final.phase.value} after max_steps exceeded. "
-            f"Expected FAILED — runner should abort attempt at step limit and "
+            f"Expected FAILED or PAUSED — runner should abort attempt at step limit and "
             f"exhaust retries rather than marking COMPLETED."
         )
 

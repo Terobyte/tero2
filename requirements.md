@@ -281,7 +281,7 @@ Key interface to verify:
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/test_stuck_and_escalation.py -k "TestStuckDetection" -v`
 Expected: All PASS
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tero2/stuck_detection.py
@@ -293,29 +293,29 @@ git commit -m "add stuck detection module with 3 structural signals"
 ### Task 4: Verify and commit `escalation.py`
 
 **Files:**
-- [ ] Verify: `tero2/escalation.py` (already in working tree, unstaged)
-- [ ] Test: `tests/test_stuck_and_escalation.py` (already exists — comprehensive, Parts 2+3+4)
+- [x] Verify: `tero2/escalation.py` (already in working tree, unstaged)
+- [x] Test: `tests/test_stuck_and_escalation.py` (already exists — comprehensive, Parts 2+3+4)
 
 > Do NOT create a new `test_escalation.py`. All escalation tests are in `tests/test_stuck_and_escalation.py`.
 
-- [ ] **Step 1: Read `tero2/escalation.py` and verify against spec**
+- [x] **Step 1: Read `tero2/escalation.py` and verify against spec**
 
 Key interface to verify:
-- [ ] `EscalationLevel` enum: NONE=0, DIVERSIFICATION=1, BACKTRACK_COACH=2, HUMAN=3
-- [ ] `EscalationAction` dataclass: level, inject_prompt, should_backtrack, should_pause
-- [ ] `decide_escalation(stuck_result, current_level, diversification_steps, config)` → EscalationAction
-- [ ] `execute_escalation(action, state, disk, notifier, checkpoint, ...)` → AgentState
-- [ ] `write_stuck_report(disk, state, stuck_result, escalation_history)` → None
-- [ ] Level 1: inject diversification prompt
-- [ ] Level 2: reset stuck counters, write EVENT_JOURNAL, resume
-- [ ] Level 3: write STUCK_REPORT.md, Telegram notify, PAUSE
+- [x] `EscalationLevel` enum: NONE=0, DIVERSIFICATION=1, BACKTRACK_COACH=2, HUMAN=3
+- [x] `EscalationAction` dataclass: level, inject_prompt, should_backtrack, should_pause
+- [x] `decide_escalation(stuck_result, current_level, diversification_steps, config)` → EscalationAction
+- [x] `execute_escalation(action, state, disk, notifier, checkpoint, ...)` → AgentState
+- [x] `write_stuck_report(disk, state, stuck_result, escalation_history)` → None
+- [x] Level 1: inject diversification prompt
+- [x] Level 2: reset stuck counters, write EVENT_JOURNAL, resume
+- [x] Level 3: write STUCK_REPORT.md, Telegram notify, PAUSE
 
-- [ ] **Step 2: Run existing escalation + runner integration tests**
+- [x] **Step 2: Run existing escalation + runner integration tests**
 
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/test_stuck_and_escalation.py -v`
 Expected: All PASS
 
-- [ ] **Step 3: Also commit runner.py (already has MVP2 integration)**
+- [x] **Step 3: Also commit runner.py (already has MVP2 integration)**
 
 ```bash
 git add tero2/escalation.py tero2/runner.py
@@ -329,10 +329,10 @@ git commit -m "add 3-level escalation and wire into runner"
 ### Task 5: Create `reflexion.py`
 
 **Files:**
-- [ ] Create: `tero2/reflexion.py`
-- [ ] Test: `tests/test_reflexion.py`
+- [x] Create: `tero2/reflexion.py`
+- [x] Test: `tests/test_reflexion.py`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```python
 # tests/test_reflexion.py
@@ -384,12 +384,12 @@ def test_add_attempt_increments():
     assert ctx.attempts[1].attempt_number == 2
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/test_reflexion.py -v`
 Expected: ImportError
 
-- [ ] **Step 3: Implement reflexion.py**
+- [x] **Step 3: Implement reflexion.py**
 
 ```python
 # tero2/reflexion.py
@@ -457,7 +457,7 @@ def add_attempt(
     return ReflexionContext(attempts=[*context.attempts, attempt])
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/test_reflexion.py -v`
 Expected: All 5 tests PASS
