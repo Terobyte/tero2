@@ -248,7 +248,7 @@ async def run_prompt_collected(self, prompt: str) -> str:
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/test_chain_collected.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tero2/providers/chain.py tests/test_chain_collected.py
