@@ -175,7 +175,7 @@ Expected: All 5 tests PASS
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/ -v`
 Expected: All existing tests PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tero2/config.py tests/test_config_mvp1.py
@@ -187,10 +187,10 @@ git commit -m "add reflexion config and allowed_chat_ids to telegram config"
 ### Task 2: Add `run_prompt_collected()` to ProviderChain
 
 **Files:**
-- [ ] Modify: `tero2/providers/chain.py`
-- [ ] Test: `tests/test_chain_collected.py`
+- [x] Modify: `tero2/providers/chain.py`
+- [x] Test: `tests/test_chain_collected.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_chain_collected.py
@@ -217,12 +217,12 @@ def test_run_prompt_collected_concatenates_text():
     assert "World" in result
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/test_chain_collected.py -v`
 Expected: AttributeError — method doesn't exist
 
-- [ ] **Step 3: Implement run_prompt_collected**
+- [x] **Step 3: Implement run_prompt_collected**
 
 ```python
 # Add to ProviderChain class in tero2/providers/chain.py:
@@ -243,7 +243,7 @@ async def run_prompt_collected(self, prompt: str) -> str:
     return "\n".join(parts)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd /Users/terobyte/Desktop/Projects/Active/tero2 && python -m pytest tests/test_chain_collected.py -v`
 Expected: PASS
