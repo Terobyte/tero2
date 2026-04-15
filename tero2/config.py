@@ -17,7 +17,23 @@ from tero2.constants import (
     DEFAULT_PROVIDER_TIMEOUT_S,
     MAX_STEPS_PER_TASK,
     MAX_TASK_RETRIES,
+    RATE_LIMIT_MAX_RETRIES,
+    RATE_LIMIT_WAIT_S,
 )
+
+
+@dataclass
+class StuckDetectionConfig:
+    max_steps_per_task: int = 15
+    max_retries: int = 3
+    tool_repeat_threshold: int = 2
+
+
+@dataclass
+class EscalationConfig:
+    diversification_temp_delta: float = 0.3
+    diversification_max_steps: int = 2
+    backtrack_to_last_checkpoint: bool = True
 
 
 @dataclass
@@ -29,12 +45,18 @@ class RoleConfig:
 
 
 @dataclass
+class ReflexionConfig:
+    max_cycles: int = 2
+
+
+@dataclass
 class TelegramConfig:
     bot_token: str = ""
     chat_id: str = ""
     heartbeat_interval_s: int = DEFAULT_HEARTBEAT_INTERVAL_S
     voice_on_done: bool = True
     voice_on_stuck: bool = True
+    allowed_chat_ids: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -45,6 +67,8 @@ class RetryConfig:
     max_steps_per_task: int = MAX_STEPS_PER_TASK
     cb_failure_threshold: int = CB_FAILURE_THRESHOLD
     cb_recovery_timeout_s: int = CB_RECOVERY_TIMEOUT_S
+    rate_limit_wait_s: float = RATE_LIMIT_WAIT_S
+    rate_limit_max_retries: int = RATE_LIMIT_MAX_RETRIES
 
 
 @dataclass
@@ -55,6 +79,9 @@ class Config:
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     retry: RetryConfig = field(default_factory=RetryConfig)
     providers: dict[str, dict] = field(default_factory=dict)
+    stuck_detection: StuckDetectionConfig = field(default_factory=StuckDetectionConfig)
+    escalation: EscalationConfig = field(default_factory=EscalationConfig)
+    reflexion: ReflexionConfig = field(default_factory=ReflexionConfig)
 
 
 def load_config(project_path: Path, override_path: Path | None = None) -> Config:
@@ -113,6 +140,7 @@ def _parse_config(raw: dict) -> Config:
             heartbeat_interval_s=tg.get("heartbeat_interval_s", DEFAULT_HEARTBEAT_INTERVAL_S),
             voice_on_done=tg.get("voice_on_done", True),
             voice_on_stuck=tg.get("voice_on_stuck", True),
+            allowed_chat_ids=[str(x) for x in tg.get("allowed_chat_ids", [])],
         )
 
     retry = raw.get("retry", {})
@@ -124,7 +152,32 @@ def _parse_config(raw: dict) -> Config:
             max_steps_per_task=retry.get("max_steps_per_task", MAX_STEPS_PER_TASK),
             cb_failure_threshold=retry.get("cb_failure_threshold", CB_FAILURE_THRESHOLD),
             cb_recovery_timeout_s=retry.get("cb_recovery_timeout_s", CB_RECOVERY_TIMEOUT_S),
+            rate_limit_wait_s=retry.get("rate_limit_wait_s", RATE_LIMIT_WAIT_S),
+            rate_limit_max_retries=retry.get("rate_limit_max_retries", RATE_LIMIT_MAX_RETRIES),
         )
 
     cfg.providers = raw.get("providers", {})
+
+    sd = raw.get("stuck_detection", {})
+    if sd:
+        cfg.stuck_detection = StuckDetectionConfig(
+            max_steps_per_task=sd.get("max_steps_per_task", 15),
+            max_retries=sd.get("max_retries", 3),
+            tool_repeat_threshold=sd.get("tool_repeat_threshold", 2),
+        )
+
+    esc = raw.get("escalation", {})
+    if esc:
+        cfg.escalation = EscalationConfig(
+            diversification_temp_delta=esc.get("diversification_temp_delta", 0.3),
+            diversification_max_steps=esc.get("diversification_max_steps", 2),
+            backtrack_to_last_checkpoint=esc.get("backtrack_to_last_checkpoint", True),
+        )
+
+    ref = raw.get("reflexion", {})
+    if ref:
+        cfg.reflexion = ReflexionConfig(
+            max_cycles=ref.get("max_cycles", 2),
+        )
+
     return cfg

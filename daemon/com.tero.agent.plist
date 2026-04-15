@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tero.agent</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/terobyte/.local/bin/tero2</string>
+        <string>run</string>
+        <string>/Users/terobyte/Desktop/Projects/Active/current-project</string>
+        <string>--plan</string>
+        <string>plan.md</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/tero-agent.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/tero-agent.err</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/terobyte/Desktop/Projects/Active</string>
+</dict>
+</plist>

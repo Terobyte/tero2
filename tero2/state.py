@@ -24,12 +24,15 @@ class AgentState:
     current_task: str = ""
     retry_count: int = 0
     steps_in_task: int = 0
+    last_tool_hash: str = ""
+    tool_repeat_count: int = 0        # consecutive same-hash count (stuck detection)
     last_checkpoint: str = ""
     provider_index: int = 0
     started_at: str = ""
     updated_at: str = ""
     error_message: str = ""
     plan_file: str = ""
+    escalation_level: int = 0         # current escalation level (0-3)
 
     def to_json(self) -> str:
         d = asdict(self)
