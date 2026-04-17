@@ -43,7 +43,6 @@ class FileLock:
             except OSError:
                 pass
             self._fd = None
-            self.lock_path.unlink(missing_ok=True)
 
     def is_held(self) -> tuple[bool, int]:
         pid = self._read_pid()
@@ -59,6 +58,8 @@ class FileLock:
 
     @staticmethod
     def _pid_alive(pid: int) -> bool:
+        if pid <= 0:
+            return False
         try:
             os.kill(pid, 0)
             return True

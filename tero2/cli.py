@@ -5,6 +5,7 @@ Commands:
     tero2 status <project_path>                  — show current state
     tero2 init <project_path>                    — initialize .sora/ structure
     tero2 telegram                               — start Telegram plan-input bot
+    tero2 harden <project_path> --plan <plan.md> — harden plan with Reviewer loop
 """
 
 from __future__ import annotations
@@ -97,6 +98,72 @@ def cmd_init(args: argparse.Namespace) -> None:
     print(f"initialized .sora/ in {project_path}")
 
 
+def cmd_harden(args: argparse.Namespace) -> None:
+    logging.basicConfig(
+        level=logging.DEBUG if args.debug else logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+
+    project_path = Path(args.project_path).expanduser().resolve()
+    if not project_path.is_dir():
+        print(f"error: {project_path} is not a directory")
+        sys.exit(1)
+
+    plan_file = Path(args.plan).expanduser()
+    if not plan_file.is_absolute():
+        plan_file = (project_path / plan_file).resolve()
+    else:
+        plan_file = plan_file.resolve()
+
+    if not plan_file.is_file():
+        print(f"error: plan file not found: {plan_file}")
+        sys.exit(1)
+
+    from tero2.circuit_breaker import CircuitBreakerRegistry
+    from tero2.config import load_config
+    from tero2.disk_layer import DiskLayer
+    from tero2.phases.context import RunnerContext
+    from tero2.phases.harden_phase import run_harden
+    from tero2.state import AgentState
+
+    config = load_config(project_path)
+
+    if "reviewer" not in config.roles:
+        print("error: [roles.reviewer] must be configured for tero2 harden")
+        sys.exit(1)
+
+    if args.rounds is not None:
+        config.plan_hardening.max_rounds = args.rounds
+    if args.debug:
+        config.plan_hardening.debug = True
+
+    disk = DiskLayer(project_path)
+    disk.init()
+    disk.write_file("milestones/M001/PLAN.md", plan_file.read_text())
+
+    state = AgentState()
+    state.plan_file = str(plan_file)
+
+    ctx = RunnerContext(
+        config=config,
+        disk=disk,
+        state=state,
+        cb_registry=CircuitBreakerRegistry(
+            failure_threshold=config.retry.cb_failure_threshold,
+            recovery_timeout_s=config.retry.cb_recovery_timeout_s,
+        ),
+    )
+
+    result = asyncio.run(run_harden(ctx))
+
+    if result.success:
+        hardened_path = disk.sora_dir / "milestones" / "M001" / "PLAN.md"
+        print(f"hardening complete — {hardened_path}")
+    else:
+        print(f"error: hardening failed — {result.error}")
+        sys.exit(1)
+
+
 def cmd_telegram(args: argparse.Namespace) -> None:
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -148,6 +215,19 @@ def _build_parser() -> argparse.ArgumentParser:
     telegram_parser.add_argument("--project", help="Project path (default: cwd)", default=None)
     telegram_parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
     telegram_parser.set_defaults(func=cmd_telegram)
+
+    harden_parser = subparsers.add_parser(
+        "harden", help="Harden a plan with Reviewer convergence loop"
+    )
+    harden_parser.add_argument("project_path", help="Path to the project root")
+    harden_parser.add_argument("--plan", required=True, help="Path to the plan file to harden")
+    harden_parser.add_argument(
+        "--rounds", type=int, default=None, help="Max hardening rounds (overrides config)"
+    )
+    harden_parser.add_argument(
+        "--debug", action="store_true", help="Enable verbose per-round output"
+    )
+    harden_parser.set_defaults(func=cmd_harden)
 
     return parser
 

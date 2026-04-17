@@ -131,8 +131,7 @@ async def execute_escalation(
     if action.level == EscalationLevel.DIVERSIFICATION:
         log.info("escalation Level 1: diversification — injecting new-approach prompt")
         state.escalation_level = EscalationLevel.DIVERSIFICATION.value
-        state.touch()
-        disk.write_state(state)
+        state = checkpoint.save(state)
         await notifier.notify("stuck detected — diversifying approach", NotifyLevel.STUCK)
         return state
 
@@ -153,8 +152,7 @@ async def execute_escalation(
             state.tool_repeat_count = 0
             state.last_tool_hash = ""
         state.escalation_level = EscalationLevel.BACKTRACK_COACH.value
-        state.touch()
-        disk.write_state(state)
+        state = checkpoint.save(state)
         await notifier.notify("stuck — backtracking to last checkpoint", NotifyLevel.STUCK)
         return state
 

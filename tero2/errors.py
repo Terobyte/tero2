@@ -62,6 +62,15 @@ class ConfigError(Tero2Error):
     """Invalid or missing configuration."""
 
 
+class ContextWindowExceededError(Tero2Error):
+    """Assembled prompt exceeds hard-fail budget."""
+
+    def __init__(self, tokens: int, limit: int) -> None:
+        self.tokens = tokens
+        self.limit = limit
+        super().__init__(f"context window exceeded: {tokens} tokens > {limit} limit")
+
+
 class RunnerError(Tero2Error):
     """Base for runner lifecycle errors."""
 

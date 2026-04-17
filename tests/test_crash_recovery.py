@@ -16,13 +16,14 @@ from unittest.mock import patch
 
 import pytest
 
+from tero2.checkpoint import CheckpointManager
 from tero2.circuit_breaker import CircuitBreakerRegistry
 from tero2.config import Config, RoleConfig, TelegramConfig
 from tero2.disk_layer import DiskLayer
 from tero2.errors import ProviderError
 from tero2.providers.base import BaseProvider
 from tero2.providers.chain import ProviderChain
-from tero2.state import Phase
+from tero2.state import AgentState, Phase, SoraPhase
 
 
 def _setup_project(tmp_path: Path):
@@ -257,3 +258,90 @@ class TestCrashAutoRestart:
 
         final = disk.read_state()
         assert final.phase == Phase.COMPLETED
+
+
+# ── CheckpointManager.set_sora_phase ─────────────────────────────────────────
+
+
+class TestSetSoraPhase:
+    """set_sora_phase() persists SoraPhase transitions and restores correctly."""
+
+    def _make_checkpoint(self, tmp_path: Path) -> tuple[CheckpointManager, DiskLayer]:
+        disk = DiskLayer(tmp_path)
+        disk.init()
+        cm = CheckpointManager(disk)
+        return cm, disk
+
+    def test_set_sora_phase_updates_state(self, tmp_path):
+        """set_sora_phase sets state.sora_phase and returns updated state."""
+        cm, disk = self._make_checkpoint(tmp_path)
+        state = AgentState()
+        updated = cm.set_sora_phase(state, SoraPhase.SCOUT)
+        assert updated.sora_phase == SoraPhase.SCOUT
+
+    def test_set_sora_phase_persists_to_disk(self, tmp_path):
+        """set_sora_phase writes to disk so restore() returns the new phase."""
+        cm, disk = self._make_checkpoint(tmp_path)
+        state = AgentState()
+        cm.set_sora_phase(state, SoraPhase.ARCHITECT)
+        restored = cm.restore()
+        assert restored.sora_phase == SoraPhase.ARCHITECT
+
+    def test_set_sora_phase_sequence_all_values(self, tmp_path):
+        """Each SoraPhase round-trips through disk correctly."""
+        cm, disk = self._make_checkpoint(tmp_path)
+        for phase in (
+            SoraPhase.HARDENING,
+            SoraPhase.SCOUT,
+            SoraPhase.COACH,
+            SoraPhase.ARCHITECT,
+            SoraPhase.EXECUTE,
+            SoraPhase.SLICE_DONE,
+            SoraPhase.NONE,
+        ):
+            state = AgentState()
+            cm.set_sora_phase(state, phase)
+            restored = cm.restore()
+            assert restored.sora_phase == phase, (
+                f"expected {phase!r} on restore, got {restored.sora_phase!r}"
+            )
+
+    def test_set_sora_phase_does_not_alter_run_phase(self, tmp_path):
+        """set_sora_phase only touches sora_phase; AgentState.phase is unchanged."""
+        cm, disk = self._make_checkpoint(tmp_path)
+        state = AgentState(phase=Phase.RUNNING)
+        disk.write_state(state)
+        updated = cm.set_sora_phase(state, SoraPhase.EXECUTE)
+        restored = cm.restore()
+        assert restored.phase == Phase.RUNNING
+        assert restored.sora_phase == SoraPhase.EXECUTE
+
+    def test_set_sora_phase_updates_last_checkpoint_timestamp(self, tmp_path):
+        """save() is called internally, so last_checkpoint is updated."""
+        cm, disk = self._make_checkpoint(tmp_path)
+        state = AgentState()
+        before = state.last_checkpoint
+        updated = cm.set_sora_phase(state, SoraPhase.COACH)
+        assert updated.last_checkpoint != before or updated.last_checkpoint != ""
+
+    def test_set_sora_phase_returns_same_object(self, tmp_path):
+        """set_sora_phase mutates and returns the passed-in state object."""
+        cm, disk = self._make_checkpoint(tmp_path)
+        state = AgentState()
+        returned = cm.set_sora_phase(state, SoraPhase.HARDENING)
+        assert returned is state
+
+    def test_crash_recovery_restores_sora_phase(self, tmp_path):
+        """Simulate crash mid-SORA: disk has sora_phase=EXECUTE; new CM restores it."""
+        disk = DiskLayer(tmp_path)
+        disk.init()
+        # First CM writes state mid-pipeline
+        cm1 = CheckpointManager(disk)
+        state = AgentState(phase=Phase.RUNNING)
+        cm1.set_sora_phase(state, SoraPhase.EXECUTE)
+
+        # Second CM (new process after crash) restores from disk
+        cm2 = CheckpointManager(disk)
+        restored = cm2.restore()
+        assert restored.sora_phase == SoraPhase.EXECUTE
+        assert restored.phase == Phase.RUNNING

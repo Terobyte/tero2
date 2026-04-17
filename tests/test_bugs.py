@@ -86,7 +86,7 @@ class TestBug6RetryLoopIgnoresRetryCount:
         state.save(disk.sora_dir / "runtime" / "STATE.json")
 
         with patch.object(runner, "_build_chain", return_value=failing_chain):
-            await runner._execute_plan(state)
+            await runner._execute_legacy(state)
 
         final = disk.read_state()
         assert final.retry_count <= config.retry.max_retries, (
@@ -98,7 +98,7 @@ class TestBug6RetryLoopIgnoresRetryCount:
     def test_execute_plan_source_accounts_for_retry_count(self):
         from tero2.runner import Runner
 
-        source = inspect.getsource(Runner._execute_plan)
+        source = inspect.getsource(Runner._run_legacy_agent)
         loop_line = None
         for line in source.split("\n"):
             if "range(" in line and ("max_retries" in line or "max_attempts" in line):
@@ -293,7 +293,7 @@ class TestBug9UnhandledExceptionLeavesStateRunning:
         async def boom(state, shutdown_event=None):
             raise ConfigError("something broke")
 
-        with patch.object(runner, "_execute_plan", side_effect=boom):
+        with patch.object(runner, "_execute_legacy", side_effect=boom):
             try:
                 await runner.run()
             except ConfigError:
@@ -317,7 +317,7 @@ class TestBug9UnhandledExceptionLeavesStateRunning:
         async def boom(state, shutdown_event=None):
             raise RuntimeError("unexpected")
 
-        with patch.object(runner, "_execute_plan", side_effect=boom):
+        with patch.object(runner, "_execute_legacy", side_effect=boom):
             try:
                 await runner.run()
             except RuntimeError:

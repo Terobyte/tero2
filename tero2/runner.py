@@ -14,32 +14,62 @@ from pathlib import Path
 from tero2.circuit_breaker import CircuitBreakerRegistry
 from tero2.checkpoint import CheckpointManager
 from tero2.config import Config, load_config
-from tero2.constants import EXIT_LOCK_HELD, HARD_TIMEOUT_S
+from tero2.constants import EXIT_LOCK_HELD
 from tero2.disk_layer import DiskLayer
-from tero2.errors import LockHeldError, RateLimitError
+from tero2.errors import LockHeldError
 from tero2.escalation import (
     EscalationAction,
     EscalationLevel,
     decide_escalation,
     execute_escalation,
 )
-from tero2.lock import FileLock
+from tero2.events import Command, EventDispatcher, make_event
 from tero2.notifier import Notifier, NotifyLevel
+from tero2.phases import run_architect, run_coach, run_execute, run_harden, run_scout
+from tero2.phases.context import (
+    RunnerContext,
+    _load_slice_plan_from_disk,
+    _read_next_slice,
+)
+from tero2.project_lock import ProjectLock
 from tero2.providers.chain import ProviderChain
 from tero2.providers.registry import create_provider
 from tero2.reflexion import MAX_BUILDER_OUTPUT_CHARS, ReflexionContext, add_attempt
-from tero2.state import AgentState, Phase
-from tero2.stuck_detection import StuckSignal, check_stuck, update_tool_hash
+from tero2.state import AgentState, Phase, SoraPhase
+from tero2.stuck_detection import StuckSignal, check_stuck
+from tero2.triggers import CoachTrigger
 
 log = logging.getLogger(__name__)
+
+_IDLE_POLL_S = 60.0
+
+
+_PHASE_ORDER = [
+    SoraPhase.HARDENING,
+    SoraPhase.SCOUT,
+    SoraPhase.COACH,
+    SoraPhase.ARCHITECT,
+    SoraPhase.EXECUTE,
+    SoraPhase.SLICE_DONE,
+]
+
+
+def _phase_already_done(current: SoraPhase, candidate: SoraPhase) -> bool:
+    try:
+        return _PHASE_ORDER.index(candidate) < _PHASE_ORDER.index(current)
+    except ValueError:
+        return False
 
 
 class Runner:
     def __init__(
         self,
         project_path: Path,
-        plan_file: Path,
+        plan_file: Path | None = None,
         config: Config | None = None,
+        *,
+        dispatcher: EventDispatcher | None = None,
+        command_queue: asyncio.Queue[Command] | None = None,
     ) -> None:
         self.project_path = project_path
         self.plan_file = plan_file
@@ -49,16 +79,15 @@ class Runner:
             self.disk, max_steps_per_task=self.config.retry.max_steps_per_task
         )
         self.notifier = Notifier(self.config.telegram)
-        self.lock = FileLock(self.disk.lock_path)
+        self.lock = ProjectLock(self.disk.lock_path)
         self.cb_registry = CircuitBreakerRegistry(
             failure_threshold=self.config.retry.cb_failure_threshold,
             recovery_timeout_s=self.config.retry.cb_recovery_timeout_s,
         )
         self._current_state: AgentState | None = None
-        # Escalation state (instance-level — persists across _execute_plan calls)
-        self._escalation_level = EscalationLevel.NONE
-        self._div_steps = 0
-        self._escalation_history: list[EscalationLevel] = []
+        self._dispatcher = dispatcher
+        self._command_queue = command_queue
+        self._ctx: RunnerContext | None = None
 
     async def run(self) -> None:
         self.disk.init()
@@ -78,14 +107,27 @@ class Runner:
             self._current_state = state
 
             if state.phase == Phase.COMPLETED:
+                await self._idle_loop(_shutdown_event)
                 return
 
             if state.phase in (Phase.IDLE, Phase.FAILED):
+                if self.plan_file is None:
+                    await self._idle_loop(_shutdown_event)
+                    return
                 state = self.checkpoint.mark_started(str(self.plan_file))
                 self._current_state = state
+                await self.notifier.notify("started", NotifyLevel.PROGRESS)
+            elif state.phase in (Phase.RUNNING, Phase.PAUSED):
+                if not state.plan_file:
+                    await self._idle_loop(_shutdown_event)
+                    return
+                if state.phase == Phase.PAUSED:
+                    state = self.checkpoint.mark_running(state)
+                    self._current_state = state
+                await self.notifier.notify("resumed", NotifyLevel.PROGRESS)
 
-            await self.notifier.notify("started", NotifyLevel.PROGRESS)
             await self._execute_plan(state, _shutdown_event)
+            await self._idle_loop(_shutdown_event)
 
         except LockHeldError:
             print("another tero2 instance is running")
@@ -94,6 +136,8 @@ class Runner:
             if self._current_state and self._current_state.phase == Phase.RUNNING:
                 with suppress(Exception):
                     self.checkpoint.mark_failed(self._current_state, "unexpected error")
+                with suppress(Exception):
+                    await self._emit_error("unexpected fatal error")
             raise
         finally:
             with suppress(ValueError):
@@ -105,11 +149,107 @@ class Runner:
     async def _execute_plan(
         self, state: AgentState, shutdown_event: asyncio.Event | None = None
     ) -> None:
-        plan_content = self.disk.read_plan(str(self.plan_file))
+        """Top-level dispatcher: SORA pipeline for builder configs, legacy otherwise."""
+        if "builder" in self.config.roles:
+            await self._execute_sora(state, shutdown_event)
+        else:
+            await self._execute_legacy(state, shutdown_event)
+
+    async def _execute_legacy(
+        self, state: AgentState, shutdown_event: asyncio.Event | None = None
+    ) -> None:
+        ctx = self._build_runner_context(state, shutdown_event)
+        ctx.reset()
+        self._ctx = ctx
+        await self._run_legacy_agent(ctx, shutdown_event)
+
+    def _build_runner_context(
+        self, state: AgentState, shutdown_event: asyncio.Event | None
+    ) -> RunnerContext:
+        return RunnerContext(
+            config=self.config,
+            disk=self.disk,
+            checkpoint=self.checkpoint,
+            notifier=self.notifier,
+            state=state,
+            cb_registry=self.cb_registry,
+            project_path=str(self.project_path),
+            shutdown_event=shutdown_event,
+            dispatcher=self._dispatcher,
+            command_queue=self._command_queue,
+        )
+
+    async def _emit_phase(self, phase: SoraPhase) -> None:
+        if self._dispatcher is not None:
+            await self._dispatcher.emit(
+                make_event(
+                    "phase_change",
+                    role="runner",
+                    data={"sora_phase": phase.value},
+                    priority=True,
+                )
+            )
+
+    async def _emit_done(self) -> None:
+        if self._dispatcher is not None:
+            await self._dispatcher.emit(make_event("done", role="runner", priority=True))
+
+    async def _emit_error(self, msg: str) -> None:
+        if self._dispatcher is not None:
+            await self._dispatcher.emit(
+                make_event("error", role="runner", data={"message": msg}, priority=True)
+            )
+
+    async def _drain_commands(self, state: AgentState) -> tuple[AgentState, bool]:
+        """Drain command queue at a phase boundary.
+
+        Returns (updated_state, should_continue).
+        On stop/pause commands the state is persisted and should_continue=False.
+        """
+        if self._command_queue is None:
+            return state, True
+        while not self._command_queue.empty():
+            try:
+                cmd = self._command_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if cmd.kind == "stop":
+                state = self.checkpoint.mark_failed(
+                    state, f"stopped via {cmd.source or 'command'}"
+                )
+                self._current_state = state
+                return state, False
+            if cmd.kind == "pause":
+                state = self.checkpoint.mark_paused(state, f"paused via {cmd.source or 'command'}")
+                self._current_state = state
+                return state, False
+            if cmd.kind == "switch_provider":
+                role = cmd.data.get("role", "")
+                provider = cmd.data.get("provider", "")
+                if role and provider and role in self.config.roles:
+                    self.config.roles[role].provider = provider
+                    log.info("hot-swap: %s provider → %s", role, provider)
+                    if self._dispatcher is not None:
+                        await self._dispatcher.emit(
+                            make_event(
+                                "provider_switch",
+                                role=role,
+                                data={"role": role, "provider": provider},
+                                priority=True,
+                            )
+                        )
+        return state, True
+
+    async def _run_legacy_agent(
+        self, ctx: RunnerContext, shutdown_event: asyncio.Event | None = None
+    ) -> None:
+        state = ctx.state
+        plan_content = self.disk.read_plan(state.plan_file)
         if not plan_content or not plan_content.strip():
             state = self.checkpoint.mark_failed(state, "plan file is empty or missing")
             self._current_state = state
             await self.notifier.notify("failed — empty plan", NotifyLevel.ERROR)
+            await self._emit_error("plan file is empty or missing")
             return
         retry_cfg = self.config.retry
         reflexion_ctx = ReflexionContext()
@@ -119,16 +259,18 @@ class Runner:
         )
 
         for attempt in range(state.retry_count, max_attempts):
-            # ── MVP2: stuck detection + escalation ──────────────────
             inject_prompt = ""
             if attempt > 0:
                 stuck = check_stuck(state, self.config.stuck_detection)
                 if stuck.signal != StuckSignal.NONE:
                     action = decide_escalation(
-                        stuck, self._escalation_level, self._div_steps, self.config.escalation
+                        stuck,
+                        ctx.escalation_level,
+                        ctx.div_steps,
+                        self.config.escalation,
                     )
                     if action.level != EscalationLevel.NONE:
-                        self._escalation_history.append(action.level)
+                        ctx.escalation_history.append(action.level)
                     state = await execute_escalation(
                         action,
                         state,
@@ -136,17 +278,19 @@ class Runner:
                         self.notifier,
                         self.checkpoint,
                         stuck_result=stuck,
-                        escalation_history=self._escalation_history,
+                        escalation_history=ctx.escalation_history,
                     )
                     self._current_state = state
-                    self._escalation_level = action.level
+                    ctx.escalation_level = action.level
                     if action.should_pause:
-                        return  # Level 3: paused, waiting for human
+                        return
                     if action.level == EscalationLevel.DIVERSIFICATION:
-                        self._div_steps += 1
+                        ctx.div_steps += 1
                     elif action.level == EscalationLevel.BACKTRACK_COACH:
-                        self._div_steps = 0
+                        ctx.div_steps = 0
                     inject_prompt = action.inject_prompt
+                else:
+                    ctx.escalation_level = EscalationLevel.NONE
 
             if attempt > 0:
                 wait = min(
@@ -162,6 +306,7 @@ class Runner:
                 if state.phase == Phase.FAILED:
                     self._current_state = state
                     await self.notifier.notify("stopped by OVERRIDE.md", NotifyLevel.ERROR)
+                    await self._emit_error("stopped by OVERRIDE.md")
                     return
                 if state.phase == Phase.PAUSED:
                     await self.notifier.notify(
@@ -169,16 +314,35 @@ class Runner:
                         NotifyLevel.STUCK,
                     )
                     while await self._override_contains_pause():
+                        override_now = await self._check_override()
+                        if override_now and self._RE_STOP.search(override_now):
+                            state = self.checkpoint.mark_failed(
+                                state, "STOP directive in OVERRIDE.md"
+                            )
+                            self._current_state = state
+                            await self.notifier.notify("stopped by OVERRIDE.md", NotifyLevel.ERROR)
+                            await self._emit_error("stopped by OVERRIDE.md")
+                            return
                         if shutdown_event and shutdown_event.is_set():
                             log.info("shutdown requested during PAUSE — exiting")
                             return
                         await asyncio.sleep(60)
+                    # PAUSE is gone — but it may have been replaced by STOP
+                    override_after_pause = await self._check_override()
+                    if override_after_pause and self._RE_STOP.search(override_after_pause):
+                        state = self.checkpoint.mark_failed(
+                            state, "STOP directive in OVERRIDE.md"
+                        )
+                        self._current_state = state
+                        await self.notifier.notify("stopped by OVERRIDE.md", NotifyLevel.ERROR)
+                        await self._emit_error("stopped by OVERRIDE.md")
+                        return
                     log.info("PAUSE cleared — resuming")
                     state = self.checkpoint.mark_running(state)
                     self._current_state = state
+                    ctx.reset()
 
             effective_plan = plan_content
-            # ── MVP1: reflexion — inject failure context before plan ──
             reflexion_section = reflexion_ctx.to_prompt()
             if reflexion_section:
                 effective_plan = f"{reflexion_section}\n\n---\n\n{plan_content}"
@@ -190,16 +354,18 @@ class Runner:
                 effective_plan = f"## Steering\n{steer}\n\n---\n\n{effective_plan}"
 
             chain = self._build_chain(start_index=state.provider_index)
-            success, captured_output = await self._run_agent(chain, effective_plan, state)
+            ctx.state = state
+            success, captured_output = await ctx.run_agent(chain, effective_plan)
+            state = ctx.state
+            self._current_state = state
 
             if success:
                 state = self.checkpoint.mark_completed(state)
                 self._current_state = state
                 await self.notifier.notify("done", NotifyLevel.DONE)
+                await self._emit_done()
                 return
 
-            # ── MVP1: record failure in reflexion context ──
-            # Truncate before storing so retry prompts don't bloat.
             truncated_output = (
                 captured_output[:MAX_BUILDER_OUTPUT_CHARS] + "... [truncated]"
                 if len(captured_output) > MAX_BUILDER_OUTPUT_CHARS
@@ -215,15 +381,10 @@ class Runner:
             self._current_state = state
             log.warning(f"attempt {attempt + 1} failed, retrying...")
 
-        # Post-loop: check if RETRY_EXHAUSTED fires now that retry_count has been
-        # incremented past the stuck threshold. When retry.max_retries ==
-        # stuck_detection.max_retries the in-loop check never sees this state, so we
-        # must catch it here before falling through to mark_failed. All retries are gone
-        # at this point, so Level 1/2 recovery is impossible — go straight to Level 3.
         stuck = check_stuck(state, self.config.stuck_detection)
         if stuck.signal != StuckSignal.NONE:
             action = EscalationAction(level=EscalationLevel.HUMAN, should_pause=True)
-            self._escalation_history.append(EscalationLevel.HUMAN)
+            ctx.escalation_history.append(EscalationLevel.HUMAN)
             state = await execute_escalation(
                 action,
                 state,
@@ -231,29 +392,237 @@ class Runner:
                 self.notifier,
                 self.checkpoint,
                 stuck_result=stuck,
-                escalation_history=self._escalation_history,
+                escalation_history=ctx.escalation_history,
             )
             self._current_state = state
-            self._escalation_level = EscalationLevel.HUMAN
-            return  # Phase.PAUSED — waiting for human input
+            ctx.escalation_level = EscalationLevel.HUMAN
+            return
 
         state = self.checkpoint.mark_failed(state, "all retries exhausted")
         self._current_state = state
-        await self.notifier.notify(
-            f"failed after {self.config.retry.max_retries} attempts", NotifyLevel.ERROR
-        )
+        msg = f"failed after {self.config.retry.max_retries} attempts"
+        await self.notifier.notify(msg, NotifyLevel.ERROR)
+        await self._emit_error(msg)
 
-    def _build_chain(self, start_index: int = 0) -> ProviderChain:
-        role = self.config.roles.get("executor")
-        if role is None:
+    async def _execute_sora(
+        self, state: AgentState, shutdown_event: asyncio.Event | None = None
+    ) -> None:
+        ctx = self._build_runner_context(state, shutdown_event)
+        self._ctx = ctx
+
+        if self.plan_file:
+            roadmap_path = f"{ctx.milestone_path}/ROADMAP.md"
+            ctx.disk.write_file(roadmap_path, self.plan_file.read_text())
+
+        if "reviewer" in self.config.roles and not _phase_already_done(
+            state.sora_phase, SoraPhase.HARDENING
+        ):
+            state = self.checkpoint.set_sora_phase(state, SoraPhase.HARDENING)
+            self._current_state = state
+            await self._emit_phase(SoraPhase.HARDENING)
+            state, cont = await self._drain_commands(state)
+            if not cont:
+                return
+            await run_harden(ctx)
+
+        if "scout" in self.config.roles and not _phase_already_done(
+            state.sora_phase, SoraPhase.SCOUT
+        ):
+            state = self.checkpoint.set_sora_phase(state, SoraPhase.SCOUT)
+            self._current_state = state
+            await self._emit_phase(SoraPhase.SCOUT)
+            state, cont = await self._drain_commands(state)
+            if not cont:
+                return
+            await run_scout(ctx)
+
+        if "coach" in self.config.roles and not _phase_already_done(
+            state.sora_phase, SoraPhase.COACH
+        ):
+            state = self.checkpoint.set_sora_phase(state, SoraPhase.COACH)
+            self._current_state = state
+            await self._emit_phase(SoraPhase.COACH)
+            state, cont = await self._drain_commands(state)
+            if not cont:
+                return
+            await run_coach(ctx, CoachTrigger.FIRST_RUN)
+
+        if not _phase_already_done(state.sora_phase, SoraPhase.ARCHITECT):
+            state = self.checkpoint.set_sora_phase(state, SoraPhase.ARCHITECT)
+            self._current_state = state
+            await self._emit_phase(SoraPhase.ARCHITECT)
+            state, cont = await self._drain_commands(state)
+            if not cont:
+                return
+            result = await run_architect(ctx, slice_id=state.current_slice or "S01")
+            if not result.success:
+                msg = f"Architect failed: {result.error}"
+                await self.notifier.notify(msg, NotifyLevel.ERROR)
+                await self._emit_error(msg)
+                return
+            slice_plan = result.data["slice_plan"]
+        else:
+            slice_plan = _load_slice_plan_from_disk(ctx, state.current_slice or "S01")
+
+        if not _phase_already_done(state.sora_phase, SoraPhase.EXECUTE):
+            state = self.checkpoint.set_sora_phase(state, SoraPhase.EXECUTE)
+            self._current_state = state
+            await self._emit_phase(SoraPhase.EXECUTE)
+            state, cont = await self._drain_commands(state)
+            if not cont:
+                return
+            exec_result = await run_execute(ctx, slice_plan)
+            if not exec_result.success:
+                msg = f"Execute failed: {exec_result.error}"
+                await self.notifier.notify(msg, NotifyLevel.ERROR)
+                await self._emit_error(msg)
+                return
+
+        max_slices = self.config.max_slices
+        extra_slices_done = 0
+        _slice_loop_completed = False
+        while extra_slices_done < max_slices:
+            state = self.checkpoint.set_sora_phase(state, SoraPhase.SLICE_DONE)
+            self._current_state = state
+            await self._emit_phase(SoraPhase.SLICE_DONE)
+
+            if "coach" in self.config.roles:
+                await run_coach(ctx, CoachTrigger.END_OF_SLICE)
+
+            next_slice = _read_next_slice(ctx)
+            if next_slice is None:
+                _slice_loop_completed = True
+                break
+
+            state.current_slice = next_slice
+            state.current_task_index = 0
+            state = self.checkpoint.save(state)
+            self._current_state = state
+            extra_slices_done += 1
+
+            state = self.checkpoint.set_sora_phase(state, SoraPhase.ARCHITECT)
+            self._current_state = state
+            await self._emit_phase(SoraPhase.ARCHITECT)
+            state, cont = await self._drain_commands(state)
+            if not cont:
+                return
+            result = await run_architect(ctx, slice_id=next_slice)
+            if not result.success:
+                msg = f"Architect failed on {next_slice}: {result.error}"
+                await self.notifier.notify(msg, NotifyLevel.ERROR)
+                await self._emit_error(msg)
+                break
+            slice_plan = result.data["slice_plan"]
+
+            state = self.checkpoint.set_sora_phase(state, SoraPhase.EXECUTE)
+            self._current_state = state
+            await self._emit_phase(SoraPhase.EXECUTE)
+            state, cont = await self._drain_commands(state)
+            if not cont:
+                return
+            exec_result = await run_execute(ctx, slice_plan)
+            if not exec_result.success:
+                msg = f"Execute failed on {next_slice}: {exec_result.error}"
+                await self.notifier.notify(msg, NotifyLevel.ERROR)
+                await self._emit_error(msg)
+                break
+        else:
+            msg = (
+                f"extra slice limit reached ({max_slices} additional slices beyond S01) "
+                f"— stopping. Check TASK_QUEUE.md."
+            )
+            await self.notifier.notify(msg, NotifyLevel.ERROR)
+            await self._emit_error(msg)
+
+        if _slice_loop_completed:
+            state = self.checkpoint.mark_completed(state)
+            self._current_state = state
+            await self.notifier.notify("done", NotifyLevel.DONE)
+            await self._emit_done()
+
+    async def _wait_for_command(self, timeout: float | None) -> Command | None:
+        """Poll the command queue, returning None if the timeout expires."""
+        if self._command_queue is None:
+            return None
+        try:
+            return await asyncio.wait_for(self._command_queue.get(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return None
+
+    def _resolve_plan(self, text: str) -> str:
+        """Resolve plan text to a usable file path.
+
+        If *text* names an existing file, returns it as-is.
+        Otherwise writes the text to ``.sora/strategic/ROADMAP.md`` (backing
+        up any previous content to ``ROADMAP.md.bak``) and returns that path.
+        """
+        candidate = Path(text.strip())
+        if candidate.is_file():
+            return str(candidate)
+        roadmap_rel = "strategic/ROADMAP.md"
+        existing = self.disk.read_file(roadmap_rel)
+        if existing:
+            self.disk.write_file("strategic/ROADMAP.md.bak", existing)
+        self.disk.write_file(roadmap_rel, text)
+        return str(self.disk.sora_dir / roadmap_rel)
+
+    async def _idle_loop(self, shutdown_event: asyncio.Event | None = None) -> None:
+        """Wait for ``new_plan`` or ``stop`` commands when the runner is idle.
+
+        Exits immediately when there is no command queue (headless / standalone
+        mode).  When ``config.idle_timeout_s > 0`` the loop exits after that
+        many seconds without receiving any command.
+        """
+        if self._command_queue is None:
+            return
+
+        idle_timeout = float(self.config.idle_timeout_s) if self.config.idle_timeout_s > 0 else None
+        poll_s = min(_IDLE_POLL_S, idle_timeout) if idle_timeout is not None else _IDLE_POLL_S
+        elapsed = 0.0
+        log.info("idle: waiting for new_plan or stop (timeout=%s)", idle_timeout)
+
+        while True:
+            if shutdown_event and shutdown_event.is_set():
+                return
+
+            cmd = await self._wait_for_command(timeout=poll_s)
+
+            if cmd is None:
+                elapsed += poll_s
+                if idle_timeout is not None and elapsed >= idle_timeout:
+                    log.info("idle: timeout after %.0fs — exiting", elapsed)
+                    return
+                continue
+
+            if cmd.kind == "stop":
+                log.info("idle: stop command received")
+                return
+
+            if cmd.kind == "new_plan":
+                plan_text = cmd.data.get("text", "")
+                if not plan_text:
+                    log.warning("idle: new_plan command with empty text — ignoring")
+                    continue
+                plan_path = self._resolve_plan(plan_text)
+                self.plan_file = Path(plan_path)
+                new_state = self.checkpoint.mark_started(plan_path)
+                self._current_state = new_state
+                await self.notifier.notify("started", NotifyLevel.PROGRESS)
+                await self._execute_plan(new_state, shutdown_event)
+                # Reset elapsed after each plan execution to restart the idle timer
+                elapsed = 0.0
+
+    def _build_chain(self, start_index: int = 0, *, role: str = "executor") -> ProviderChain:
+        role_cfg = self.config.roles.get(role)
+        if role_cfg is None:
             from tero2.errors import ConfigError
 
-            raise ConfigError("no executor role configured")
-        all_names = [role.provider] + role.fallback
+            raise ConfigError(f"no {role!r} role configured")
+        all_names = [role_cfg.provider] + role_cfg.fallback
         names = all_names[start_index:]
         providers = []
         for i, n in enumerate(names):
-            override = role.model if start_index + i == 0 else ""
+            override = role_cfg.model if start_index + i == 0 else ""
             providers.append(
                 create_provider(
                     n, self.config, model_override=override, working_dir=str(self.project_path)
@@ -265,95 +634,6 @@ class Runner:
             rate_limit_max_retries=self.config.retry.rate_limit_max_retries,
             rate_limit_wait_s=self.config.retry.rate_limit_wait_s,
         )
-
-    async def _run_agent(
-        self,
-        chain: ProviderChain,
-        plan_content: str,
-        state: AgentState,
-    ) -> tuple[bool, str]:
-        """Run the agent and return (success, captured_output).
-
-        captured_output contains text collected from provider messages,
-        used by reflexion to inform the next retry attempt.
-        """
-        base_provider_index = state.provider_index
-        state_ref = [state]
-        captured_parts: list[str] = []
-        heartbeat_task = asyncio.create_task(self._heartbeat_loop(state_ref))
-        try:
-            timeout = self.config.roles.get("executor", None)
-            timeout_s = timeout.timeout_s if timeout else HARD_TIMEOUT_S
-            async with asyncio.timeout(timeout_s):
-                async for message in chain.run_prompt(plan_content):
-                    # Capture text content for reflexion.
-                    # Handles three provider output shapes:
-                    #   1. plain str  (e.g. ShellProvider yields decoded stdout)
-                    #   2. dict       (keys "text" or "content")
-                    #   3. object     (attrs .text or .content)
-                    if isinstance(message, str):
-                        text_content = message
-                    elif isinstance(message, dict):
-                        text_content = message.get("text") or message.get("content") or ""
-                    else:
-                        text_content = (
-                            getattr(message, "text", None)
-                            or getattr(message, "content", None)
-                            or ""
-                        )
-                    if text_content:
-                        captured_parts.append(text_content)
-
-                    msg_type = getattr(message, "type", None) or (
-                        message.get("type") if isinstance(message, dict) else None
-                    )
-                    if msg_type in ("tool_result", "turn_end"):
-                        state.provider_index = base_provider_index + chain.current_provider_index
-                        if msg_type == "tool_result":
-                            state, _ = update_tool_hash(state, str(message))
-                        state = self.checkpoint.increment_step(state)
-                        state_ref[0] = state
-                        self._current_state = state
-                        if msg_type == "tool_result":
-                            mid_stuck = check_stuck(state, self.config.stuck_detection)
-                            if mid_stuck.signal == StuckSignal.STEP_LIMIT:
-                                log.warning("STEP_LIMIT reached — aborting attempt")
-                                return False, "\n".join(captured_parts)
-                            # Hard cap from retry config (fallback when retry limit < stuck limit)
-                            if state.steps_in_task >= self.checkpoint.max_steps_per_task:
-                                log.warning("STEP_LIMIT reached — aborting attempt")
-                                return False, "\n".join(captured_parts)
-                            if mid_stuck.signal == StuckSignal.TOOL_REPEAT:
-                                log.warning("TOOL_REPEAT detected — aborting attempt")
-                                return False, "\n".join(captured_parts)
-            return True, "\n".join(captured_parts)
-        except TimeoutError:
-            log.error("hard timeout reached")
-            return False, "\n".join(captured_parts)
-        except RateLimitError:
-            log.error("all providers exhausted")
-            return False, "\n".join(captured_parts)
-        except Exception as exc:
-            from tero2.providers.chain import _is_recoverable_error
-
-            if not _is_recoverable_error(exc):
-                raise
-            log.error(f"agent error: {exc}")
-            return False, "\n".join(captured_parts)
-        finally:
-            heartbeat_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await heartbeat_task
-
-    async def _heartbeat_loop(self, state_ref: list[AgentState]) -> None:
-        interval = self.config.telegram.heartbeat_interval_s
-        while True:
-            await asyncio.sleep(interval)
-            state = state_ref[0]
-            await self.notifier.notify(
-                f"still working — step {state.steps_in_task}, retry {state.retry_count}",
-                NotifyLevel.HEARTBEAT,
-            )
 
     async def _check_override(self) -> str | None:
         content = await asyncio.to_thread(self.disk.read_override)
@@ -372,7 +652,9 @@ class Runner:
 
     def _handle_override(self, content: str, state: AgentState) -> None:
         if self._RE_STOP.search(content):
-            self.checkpoint.mark_failed(state, "STOP directive in OVERRIDE.md")
+            state = self.checkpoint.mark_failed(state, "STOP directive in OVERRIDE.md")
+            self._current_state = state
             return
         if self._RE_PAUSE.search(content) and state.phase != Phase.PAUSED:
-            self.checkpoint.mark_paused(state, "PAUSE directive in OVERRIDE.md")
+            state = self.checkpoint.mark_paused(state, "PAUSE directive in OVERRIDE.md")
+            self._current_state = state

@@ -194,8 +194,9 @@ class TestStuckDetectionToolRepeat:
         assert state.tool_repeat_count == 0
 
     def test_two_identical_calls_trigger_tool_repeat(self) -> None:
-        """Integrated: two identical update_tool_hash calls → check_stuck returns TOOL_REPEAT."""
+        """Integrated: three identical update_tool_hash calls with threshold=2 → TOOL_REPEAT."""
         state = AgentState()
+        state, _ = update_tool_hash(state, "read_file(path=foo.py)")
         state, _ = update_tool_hash(state, "read_file(path=foo.py)")
         state, _ = update_tool_hash(state, "read_file(path=foo.py)")
         result = check_stuck(state, StuckDetectionConfig(tool_repeat_threshold=2))
@@ -631,9 +632,9 @@ class TestRunnerMidStepStuckDetection:
     """_run_agent detects TOOL_REPEAT mid-step; per-attempt boundary check fires on each retry."""
 
     async def test_tool_repeat_mid_step_aborts_run_agent(self, tmp_path: Path) -> None:
-        """Two identical tool_result messages mid-step → _run_agent returns False before turn_end."""
+        """Three identical tool_result messages mid-step with threshold=2 → _run_agent returns False."""
         project, plan, config, disk = _make_project(tmp_path)
-        # Default config has tool_repeat_threshold=2 — two identical calls trigger TOOL_REPEAT
+        # Default config has tool_repeat_threshold=2 — three identical calls trigger TOOL_REPEAT
 
         runner = Runner(project, plan, config=config)
         runner.notifier.notify = _noop_notify  # type: ignore[method-assign]
@@ -645,14 +646,15 @@ class TestRunnerMidStepStuckDetection:
 
             async def run_prompt(self, prompt: str):
                 yield same_msg  # first occurrence — hash stored, no repeat yet
-                yield same_msg  # second occurrence — TOOL_REPEAT detected → abort
+                yield same_msg  # second — count=1, threshold=2 not met
+                yield same_msg  # third — count=2 >= threshold=2 → TOOL_REPEAT → abort
                 yield {"type": "turn_end"}  # never reached if abort works correctly
 
         state = AgentState(phase=Phase.RUNNING)
-        success, _ = await runner._run_agent(_RepeatToolChain(), "plan", state)
+        ctx = runner._build_runner_context(state, None)
+        success, _ = await ctx.run_agent(_RepeatToolChain(), "plan")
 
-        # Mid-step TOOL_REPEAT must abort the attempt before reaching turn_end
-        assert not success, "Expected _run_agent to return False on mid-step TOOL_REPEAT"
+        assert not success, "Expected run_agent to return False on mid-step TOOL_REPEAT"
 
     async def test_tool_repeat_mid_step_increments_repeat_count(self, tmp_path: Path) -> None:
         """After mid-step TOOL_REPEAT abort, state.tool_repeat_count reflects the repeated call."""
@@ -671,7 +673,9 @@ class TestRunnerMidStepStuckDetection:
                 yield same_msg
 
         state = AgentState(phase=Phase.RUNNING)
-        await runner._run_agent(_RepeatToolChain(), "plan", state)
+        ctx = runner._build_runner_context(state, None)
+        await ctx.run_agent(_RepeatToolChain(), "plan")
+        state = ctx.state
         assert state.tool_repeat_count >= 1, (
             f"Expected tool_repeat_count >= 1 after mid-step TOOL_REPEAT, "
             f"got {state.tool_repeat_count}"

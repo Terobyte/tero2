@@ -48,9 +48,7 @@ def check_stuck(state: AgentState, config: StuckDetectionConfig) -> StuckResult:
     if state.retry_count >= config.max_retries:
         return StuckResult(
             signal=StuckSignal.RETRY_EXHAUSTED,
-            details=(
-                f"retry_count={state.retry_count} >= max_retries={config.max_retries}"
-            ),
+            details=(f"retry_count={state.retry_count} >= max_retries={config.max_retries}"),
             severity=2,
         )
     if state.steps_in_task >= config.max_steps_per_task:
@@ -62,7 +60,7 @@ def check_stuck(state: AgentState, config: StuckDetectionConfig) -> StuckResult:
             ),
             severity=2,
         )
-    if state.tool_repeat_count > 0 and state.tool_repeat_count >= config.tool_repeat_threshold - 1:
+    if state.tool_repeat_count > 0 and config.tool_repeat_threshold > 0 and state.tool_repeat_count >= config.tool_repeat_threshold:
         return StuckResult(
             signal=StuckSignal.TOOL_REPEAT,
             details=(
@@ -71,6 +69,7 @@ def check_stuck(state: AgentState, config: StuckDetectionConfig) -> StuckResult:
             ),
             severity=2,
         )
+
     return StuckResult(signal=StuckSignal.NONE, details="", severity=0)
 
 

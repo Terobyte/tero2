@@ -152,8 +152,8 @@ class CLIProvider(BaseProvider):
             cmd = [self._name]
             if self._default_model:
                 cmd.extend(["--model", self._default_model])
-            cmd.append(prompt)
-            stdin_data: bytes | None = None
+            cmd.append("-")
+            stdin_data = prompt.encode("utf-8")
             env_override: dict[str, str] = {}
         else:
             cmd, stdin_data, env_override = builder(prompt)

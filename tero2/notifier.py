@@ -92,16 +92,11 @@ class Notifier:
             import sys
 
             target = str(TTS_SCRIPT.parent.parent)
-            inserted = target not in sys.path
-            if inserted:
+            if target not in sys.path:
                 sys.path.insert(0, target)
-            try:
-                from library.tts_fish_audio import tts_fish_audio_simple
+            from library.tts_fish_audio import tts_fish_audio_simple
 
-                result = tts_fish_audio_simple(text)
-            finally:
-                if inserted and target in sys.path:
-                    sys.path.remove(target)
+            result = tts_fish_audio_simple(text)
             return Path(result)
         except Exception:
             log.warning("TTS generation failed", exc_info=True)

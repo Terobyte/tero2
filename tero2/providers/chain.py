@@ -68,10 +68,10 @@ class ProviderChain:
 
     async def run(self, **kwargs: Any) -> AsyncGenerator[Any, None]:
         for idx, provider in enumerate(self.providers):
-            self._current_provider_index = idx
             cb = self.cb_registry.get(provider.display_name)
             if not cb.is_available:
                 continue
+            self._current_provider_index = idx
 
             # Per-provider retry loop: attempt 0 = initial call,
             # attempts 1..rate_limit_max_retries = backoff retries.

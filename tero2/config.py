@@ -20,6 +20,7 @@ from tero2.constants import (
     RATE_LIMIT_MAX_RETRIES,
     RATE_LIMIT_WAIT_S,
 )
+from tero2.errors import ConfigError
 
 
 @dataclass
@@ -37,11 +38,27 @@ class EscalationConfig:
 
 
 @dataclass
+class PlanHardeningConfig:
+    max_rounds: int = 5
+    stop_on_cosmetic_only: bool = True
+    debug: bool = False
+
+
+@dataclass
+class ContextConfig:
+    target_ratio: float = 0.70
+    warning_ratio: float = 0.80
+    hard_fail_ratio: float = 0.95
+    skip_scout_if_files_lt: int = 20
+
+
+@dataclass
 class RoleConfig:
     provider: str
     model: str = ""
     fallback: list[str] = field(default_factory=list)
     timeout_s: int = DEFAULT_PROVIDER_TIMEOUT_S
+    context_window: int = 128000
 
 
 @dataclass
@@ -82,6 +99,10 @@ class Config:
     stuck_detection: StuckDetectionConfig = field(default_factory=StuckDetectionConfig)
     escalation: EscalationConfig = field(default_factory=EscalationConfig)
     reflexion: ReflexionConfig = field(default_factory=ReflexionConfig)
+    plan_hardening: PlanHardeningConfig = field(default_factory=PlanHardeningConfig)
+    context: ContextConfig = field(default_factory=ContextConfig)
+    max_slices: int = 50
+    idle_timeout_s: int = 0
 
 
 def load_config(project_path: Path, override_path: Path | None = None) -> Config:
@@ -122,15 +143,27 @@ def _parse_config(raw: dict) -> Config:
         cfg.log_level = general["log_level"]
 
     for name, role_data in raw.get("roles", {}).items():
+        if not role_data.get("provider"):
+            raise ConfigError(f"role '{name}' missing required 'provider' field")
         cfg.roles[name] = RoleConfig(
             provider=role_data.get("provider", ""),
             model=role_data.get("model", ""),
             fallback=role_data.get("fallback", []),
             timeout_s=role_data.get("timeout_s", DEFAULT_PROVIDER_TIMEOUT_S),
+            context_window=role_data.get("context_window", 128000),
         )
 
     if "executor" not in cfg.roles:
         cfg.roles["executor"] = RoleConfig(provider="opencode")
+
+    # SORA validation: builder role requires architect and verifier
+    if "builder" in cfg.roles:
+        missing = [r for r in ("architect", "verifier") if r not in cfg.roles]
+        if missing:
+            raise ConfigError(
+                f"roles.builder requires roles.architect and roles.verifier; "
+                f"missing: {', '.join(missing)}"
+            )
 
     tg = raw.get("telegram", {})
     if tg:
@@ -179,5 +212,28 @@ def _parse_config(raw: dict) -> Config:
         cfg.reflexion = ReflexionConfig(
             max_cycles=ref.get("max_cycles", 2),
         )
+
+    ph = raw.get("plan_hardening", {})
+    if ph:
+        cfg.plan_hardening = PlanHardeningConfig(
+            max_rounds=ph.get("max_rounds", 5),
+            stop_on_cosmetic_only=ph.get("stop_on_cosmetic_only", True),
+            debug=ph.get("debug", False),
+        )
+
+    ctx = raw.get("context", {})
+    if ctx:
+        cfg.context = ContextConfig(
+            target_ratio=ctx.get("target_ratio", 0.70),
+            warning_ratio=ctx.get("warning_ratio", 0.80),
+            hard_fail_ratio=ctx.get("hard_fail_ratio", 0.95),
+            skip_scout_if_files_lt=ctx.get("skip_scout_if_files_lt", 20),
+        )
+
+    sora = raw.get("sora", {})
+    if "max_slices" in sora:
+        cfg.max_slices = sora["max_slices"]
+    if "idle_timeout_s" in sora:
+        cfg.idle_timeout_s = sora["idle_timeout_s"]
 
     return cfg

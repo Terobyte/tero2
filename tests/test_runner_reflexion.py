@@ -62,8 +62,10 @@ class TestRunnerReflexionIntegration:
         runner.notifier.notify = _fake_notify
 
         with patch.object(runner, "_build_chain", return_value=chain):
-            await runner._execute_plan(
-                AgentState(phase=Phase.RUNNING, plan_file=str(plan), started_at="2025-01-01T00:00:00")
+            await runner._execute_legacy(
+                AgentState(
+                    phase=Phase.RUNNING, plan_file=str(plan), started_at="2025-01-01T00:00:00"
+                )
             )
 
         # Should have at least 2 attempts
@@ -99,8 +101,11 @@ class TestRunnerReflexionIntegration:
 
         chain.run_prompt = _yield_messages
 
-        state = AgentState(phase=Phase.RUNNING, plan_file=str(plan), started_at="2025-01-01T00:00:00")
-        success, output = await runner._run_agent(chain, "test plan", state)
+        state = AgentState(
+            phase=Phase.RUNNING, plan_file=str(plan), started_at="2025-01-01T00:00:00"
+        )
+        ctx = runner._build_runner_context(state, None)
+        success, output = await ctx.run_agent(chain, "test plan")
 
         assert success is True
         assert "I am doing task 1" in output
@@ -121,8 +126,11 @@ class TestRunnerReflexionIntegration:
                 yield {"type": "text", "text": "tried to build auth module"}
                 raise RateLimitError("exhausted")
 
-        state = AgentState(phase=Phase.RUNNING, plan_file=str(plan), started_at="2025-01-01T00:00:00")
-        success, output = await runner._run_agent(_FailChain(), "test plan", state)
+        state = AgentState(
+            phase=Phase.RUNNING, plan_file=str(plan), started_at="2025-01-01T00:00:00"
+        )
+        ctx = runner._build_runner_context(state, None)
+        success, output = await ctx.run_agent(_FailChain(), "test plan")
 
         assert success is False
         assert "tried to build auth module" in output
@@ -136,14 +144,18 @@ class TestRunnerReflexionIntegration:
 
         class _PlainStringChain:
             """Simulates ShellProvider: yields a plain decoded string."""
+
             current_provider_index = 0
 
             async def run_prompt(self, prompt):
                 yield "plain string output from provider"
                 yield {"type": "turn_end"}
 
-        state = AgentState(phase=Phase.RUNNING, plan_file=str(plan), started_at="2025-01-01T00:00:00")
-        success, output = await runner._run_agent(_PlainStringChain(), "test plan", state)
+        state = AgentState(
+            phase=Phase.RUNNING, plan_file=str(plan), started_at="2025-01-01T00:00:00"
+        )
+        ctx = runner._build_runner_context(state, None)
+        success, output = await ctx.run_agent(_PlainStringChain(), "test plan")
 
         assert "plain string output from provider" in output, (
             f"Plain string output not captured. Got: {output!r}"
@@ -163,8 +175,11 @@ class TestRunnerReflexionIntegration:
                 yield {"type": "assistant", "content": "content-keyed output here"}
                 yield {"type": "turn_end"}
 
-        state = AgentState(phase=Phase.RUNNING, plan_file=str(plan), started_at="2025-01-01T00:00:00")
-        success, output = await runner._run_agent(_ContentDictChain(), "test plan", state)
+        state = AgentState(
+            phase=Phase.RUNNING, plan_file=str(plan), started_at="2025-01-01T00:00:00"
+        )
+        ctx = runner._build_runner_context(state, None)
+        success, output = await ctx.run_agent(_ContentDictChain(), "test plan")
 
         assert "content-keyed output here" in output, (
             f"content-key dict output not captured. Got: {output!r}"
@@ -189,8 +204,11 @@ class TestRunnerReflexionIntegration:
                 yield _Msg("object .content output")
                 yield _Msg("", msg_type="turn_end")
 
-        state = AgentState(phase=Phase.RUNNING, plan_file=str(plan), started_at="2025-01-01T00:00:00")
-        success, output = await runner._run_agent(_ContentAttrChain(), "test plan", state)
+        state = AgentState(
+            phase=Phase.RUNNING, plan_file=str(plan), started_at="2025-01-01T00:00:00"
+        )
+        ctx = runner._build_runner_context(state, None)
+        success, output = await ctx.run_agent(_ContentAttrChain(), "test plan")
 
         assert "object .content output" in output, (
             f"object .content output not captured. Got: {output!r}"
@@ -231,8 +249,10 @@ class TestRunnerReflexionIntegration:
             patch.object(runner, "_build_chain", return_value=_BigOutputChain()),
             patch("tero2.runner.add_attempt", side_effect=_spy_add_attempt),
         ):
-            await runner._execute_plan(
-                AgentState(phase=Phase.RUNNING, plan_file=str(plan), started_at="2025-01-01T00:00:00")
+            await runner._execute_legacy(
+                AgentState(
+                    phase=Phase.RUNNING, plan_file=str(plan), started_at="2025-01-01T00:00:00"
+                )
             )
 
         assert captured_attempts, "add_attempt was never called"
@@ -259,8 +279,10 @@ class TestRunnerReflexionIntegration:
         runner.notifier.notify = _fake_notify
 
         with patch.object(runner, "_build_chain", return_value=chain):
-            await runner._execute_plan(
-                AgentState(phase=Phase.RUNNING, plan_file=str(plan), started_at="2025-01-01T00:00:00")
+            await runner._execute_legacy(
+                AgentState(
+                    phase=Phase.RUNNING, plan_file=str(plan), started_at="2025-01-01T00:00:00"
+                )
             )
 
         if len(chain.received_prompts) >= 2:

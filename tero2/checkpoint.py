@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from tero2.constants import MAX_STEPS_PER_TASK
 from tero2.disk_layer import DiskLayer
 from tero2.errors import StateTransitionError
-from tero2.state import AgentState, Phase
+from tero2.state import AgentState, Phase, SoraPhase
 
 
 _VALID_TRANSITIONS: set[tuple[Phase, Phase]] = {
@@ -18,7 +18,6 @@ _VALID_TRANSITIONS: set[tuple[Phase, Phase]] = {
     (Phase.PAUSED, Phase.RUNNING),
     (Phase.PAUSED, Phase.FAILED),
     (Phase.FAILED, Phase.RUNNING),
-    (Phase.COMPLETED, Phase.RUNNING),
 }
 
 
@@ -47,8 +46,7 @@ class CheckpointManager:
         state = self._transition(state, Phase.RUNNING)
         state.plan_file = str(plan_file)
         state.started_at = datetime.now(timezone.utc).isoformat()
-        state.touch()
-        self.disk.write_state(state)
+        state = self.save(state)
         return state
 
     def mark_completed(self, state: AgentState) -> AgentState:
@@ -82,11 +80,31 @@ class CheckpointManager:
         state.retry_count += 1
         state.steps_in_task = 0
         state.provider_index = 0
+        state.tool_repeat_count = 0
+        state.last_tool_hash = ""
         state.touch()
         self.save(state)
         return state
 
     def increment_step(self, state: AgentState) -> AgentState:
         state.steps_in_task += 1
+        self.save(state)
+        return state
+
+    def set_sora_phase(self, state: AgentState, phase: SoraPhase) -> AgentState:
+        """Update the SORA pipeline phase and persist it to disk.
+
+        Call this at each SORA phase boundary (HARDENING → SCOUT → COACH →
+        ARCHITECT → EXECUTE → SLICE_DONE) so that crash recovery can resume
+        at the correct phase rather than restarting from the beginning.
+
+        Args:
+            state: Current agent state.
+            phase: Target SoraPhase value.
+
+        Returns:
+            Updated AgentState with sora_phase set and checkpoint written.
+        """
+        state.sora_phase = phase
         self.save(state)
         return state

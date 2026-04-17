@@ -231,7 +231,10 @@ class TelegramInputBot:
     async def _launch_runner(self, project_path: Path) -> None:
         """Launch tero2 runner as a subprocess for the given project.
 
-        Uses asyncio.create_subprocess_exec to avoid blocking.
+        Schedules a background watcher that calls proc.wait() and checks
+        proc.returncode to detect immediate startup failures, then sends
+        a Telegram error notification if the runner exits non-zero within
+        30 seconds of launch.
         """
         plan_path = project_path / ".sora" / "milestones" / "M001" / "ROADMAP.md"
         proc = await asyncio.create_subprocess_exec(
@@ -242,9 +245,28 @@ class TelegramInputBot:
             str(project_path),
             "--plan",
             str(plan_path),
+            stderr=asyncio.subprocess.PIPE,
         )
         log.info(f"launched runner (PID {proc.pid}) for {project_path.name}")
-        # Fire and forget -- the runner handles its own lifecycle
+        asyncio.create_task(self._watch_runner(proc, project_path))
+        await asyncio.sleep(0)  # yield so watcher starts before we return
+
+    async def _watch_runner(
+        self, proc: asyncio.subprocess.Process, project_path: Path
+    ) -> None:
+        """Background watcher: detects immediate startup failures and captures stderr."""
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=30)
+            if proc.returncode != 0:
+                stderr_bytes = await proc.stderr.read()
+                stderr_text = stderr_bytes.decode(errors="replace").strip()
+                msg = f"runner for '{project_path.name}' failed to start (exit {proc.returncode})"
+                if stderr_text:
+                    msg += f"\n{stderr_text}"
+                log.error(msg)
+                await self.notifier.send(msg, NotifyLevel.ERROR)
+        except asyncio.TimeoutError:
+            pass
 
     def _is_allowed(self, chat_id: str) -> bool:
         """Check if chat_id is in the allowed list."""

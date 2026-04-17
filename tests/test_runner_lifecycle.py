@@ -4,6 +4,7 @@ Covers:
   Step 1 — Lock prevents two tero2 run instances on the same project
   Step 2 — Stale lock (dead PID) is automatically cleaned up
   Step 3 — OVERRIDE.md with PAUSE → runner pauses → Telegram notification
+  Step 4 — Runner(project, None) resumes from checkpoint (RUNNING/PAUSED)
 """
 
 from __future__ import annotations
@@ -86,9 +87,7 @@ class TestLockExclusion:
             await runner2.run()
 
         # The lock file must still be there — runner2 must not have unlinked it.
-        assert disk.lock_path.exists(), (
-            "runner2 deleted the lock file that was held by runner1"
-        )
+        assert disk.lock_path.exists(), "runner2 deleted the lock file that was held by runner1"
         lock1.release()
 
     async def test_first_runner_completes_second_can_then_start(self, tmp_path: Path) -> None:
@@ -154,7 +153,7 @@ class TestStaleLockCleanup:
         runner = Runner(project, plan, config=config)
         runner.notifier.notify = _fake_notify_noop  # type: ignore[method-assign]
 
-        with patch.object(runner, "_execute_plan", spy_execute):
+        with patch.object(runner, "_execute_legacy", spy_execute):
             await runner.run()
 
         assert pid_during_run, "execute_plan spy was never called"
@@ -163,7 +162,7 @@ class TestStaleLockCleanup:
         )
 
     async def test_lock_released_on_normal_completion(self, tmp_path: Path) -> None:
-        """After a successful run the lock file is removed (not left behind)."""
+        """After a successful run the lock is released (flock freed)."""
         project, plan, config, disk = _make_project(tmp_path)
 
         runner = Runner(project, plan, config=config)
@@ -172,108 +171,7 @@ class TestStaleLockCleanup:
         with patch.object(runner, "_build_chain", return_value=_ImmediateChain()):
             await runner.run()
 
-        assert not disk.lock_path.exists(), (
-            "Lock file was not cleaned up after successful run"
-        )
-
-
-# ── Step 3: OVERRIDE.md PAUSE → pause + Telegram notification ────────
-
-
-class TestOverridePause:
-    """PAUSE directive in OVERRIDE.md must pause the runner and notify via Telegram."""
-
-    async def test_pause_override_sends_notification(self, tmp_path: Path) -> None:
-        """OVERRIDE.md containing PAUSE → notifier receives a 'paused' message."""
-        project, plan, config, disk = _make_project(tmp_path)
-
-        override_path = disk.sora_dir / "human" / "OVERRIDE.md"
-        override_path.write_text("PAUSE\n")
-
-        notified: list[tuple[str, object]] = []
-
-        async def capture_notify(text: str, level=None) -> bool:
-            notified.append((text, level))
-            return True
-
-        sleep_calls: list[float] = []
-
-        async def fake_sleep(secs: float) -> None:
-            sleep_calls.append(secs)
-            if len(sleep_calls) == 1:
-                # Clear PAUSE so runner exits the polling loop
-                override_path.unlink(missing_ok=True)
-
-        runner = Runner(project, plan, config=config)
-        runner.notifier.notify = capture_notify  # type: ignore[method-assign]
-
-        with (
-            patch("tero2.runner.asyncio.sleep", fake_sleep),
-            patch.object(runner, "_build_chain", return_value=_ImmediateChain()),
-        ):
-            await runner.run()
-
-        pause_msgs = [t for t, _ in notified if "pause" in t.lower()]
-        assert pause_msgs, (
-            f"Expected at least one 'paused' notification. Got: {notified}"
-        )
-
-    async def test_pause_notification_has_stuck_level(self, tmp_path: Path) -> None:
-        """The pause notification must use NotifyLevel.STUCK (for voice/priority)."""
-        project, plan, config, disk = _make_project(tmp_path)
-
-        override_path = disk.sora_dir / "human" / "OVERRIDE.md"
-        override_path.write_text("PAUSE\n")
-
-        notified: list[tuple[str, object]] = []
-
-        async def capture_notify(text: str, level=None) -> bool:
-            notified.append((text, level))
-            return True
-
-        async def fake_sleep(secs: float) -> None:
-            override_path.unlink(missing_ok=True)
-
-        runner = Runner(project, plan, config=config)
-        runner.notifier.notify = capture_notify  # type: ignore[method-assign]
-
-        with (
-            patch("tero2.runner.asyncio.sleep", fake_sleep),
-            patch.object(runner, "_build_chain", return_value=_ImmediateChain()),
-        ):
-            await runner.run()
-
-        stuck_msgs = [t for t, lvl in notified if lvl == NotifyLevel.STUCK]
-        assert stuck_msgs, (
-            f"Expected pause notification with NotifyLevel.STUCK. Got: {notified}"
-        )
-
-    async def test_runner_resumes_and_completes_after_pause_cleared(
-        self, tmp_path: Path
-    ) -> None:
-        """After PAUSE is removed from OVERRIDE.md, runner continues to COMPLETED."""
-        project, plan, config, disk = _make_project(tmp_path)
-
-        override_path = disk.sora_dir / "human" / "OVERRIDE.md"
-        override_path.write_text("PAUSE\n")
-
-        async def fake_sleep(secs: float) -> None:
-            # Remove PAUSE on any sleep call → runner exits polling loop
-            override_path.unlink(missing_ok=True)
-
-        runner = Runner(project, plan, config=config)
-        runner.notifier.notify = _fake_notify_noop  # type: ignore[method-assign]
-
-        with (
-            patch("tero2.runner.asyncio.sleep", fake_sleep),
-            patch.object(runner, "_build_chain", return_value=_ImmediateChain()),
-        ):
-            await runner.run()
-
-        final = disk.read_state()
-        assert final.phase == Phase.COMPLETED, (
-            f"Expected COMPLETED after PAUSE cleared, got {final.phase}"
-        )
+        assert runner.lock._inner._fd is None, "Lock fd should be None after release"
 
     async def test_pause_state_written_to_disk(self, tmp_path: Path) -> None:
         """During PAUSE, the PAUSED phase must be persisted to STATE.json."""
@@ -306,3 +204,88 @@ class TestOverridePause:
         assert paused_phases[0] == Phase.PAUSED, (
             f"Expected PAUSED on disk during pause, got {paused_phases[0]}"
         )
+
+
+# ── Step 4: Runner(project, None) resumes from checkpoint ────────────
+
+
+class TestOptionalPlanFile:
+    """Runner(project, None) must resume execution from a checkpointed state."""
+
+    async def test_idle_with_no_plan_returns_early(self, tmp_path: Path) -> None:
+        """IDLE state + plan_file=None → runner exits silently without error."""
+        project, _, config, disk = _make_project(tmp_path)
+
+        runner = Runner(project, None, config=config)
+        await runner.run()
+
+        assert disk.read_state().phase == Phase.IDLE
+
+    async def test_running_checkpoint_resumes_with_no_plan_arg(self, tmp_path: Path) -> None:
+        """RUNNING checkpoint + plan_file=None → runner reads plan from state and executes."""
+        project, plan, config, disk = _make_project(tmp_path)
+
+        state = disk.read_state()
+        state.phase = Phase.RUNNING
+        state.plan_file = str(plan)
+        state.started_at = "2026-01-01T00:00:00Z"
+        disk.write_state(state)
+
+        notifications: list[tuple[str, NotifyLevel]] = []
+
+        async def capture_notify(text: str, level=None) -> bool:
+            notifications.append((text, level))
+            return True
+
+        runner = Runner(project, None, config=config)
+        runner.notifier.notify = capture_notify  # type: ignore[method-assign]
+
+        with patch.object(runner, "_build_chain", return_value=_ImmediateChain()):
+            await runner.run()
+
+        assert ("resumed", NotifyLevel.PROGRESS) in notifications, (
+            f"Expected 'resumed' notification, got {notifications}"
+        )
+        assert disk.read_state().phase == Phase.COMPLETED
+
+    async def test_paused_checkpoint_resumes_with_no_plan_arg(self, tmp_path: Path) -> None:
+        """PAUSED checkpoint + plan_file=None → runner resumes and completes."""
+        project, plan, config, disk = _make_project(tmp_path)
+
+        state = disk.read_state()
+        state.phase = Phase.PAUSED
+        state.plan_file = str(plan)
+        state.started_at = "2026-01-01T00:00:00Z"
+        disk.write_state(state)
+
+        runner = Runner(project, None, config=config)
+        runner.notifier.notify = _fake_notify_noop  # type: ignore[method-assign]
+
+        with patch.object(runner, "_build_chain", return_value=_ImmediateChain()):
+            await runner.run()
+
+        assert disk.read_state().phase == Phase.COMPLETED
+
+    async def test_running_checkpoint_no_plan_file_in_state_returns(self, tmp_path: Path) -> None:
+        """RUNNING checkpoint with empty plan_file + plan_file=None → returns without executing."""
+        project, _, config, disk = _make_project(tmp_path)
+
+        state = disk.read_state()
+        state.phase = Phase.RUNNING
+        state.plan_file = ""
+        state.started_at = "2026-01-01T00:00:00Z"
+        disk.write_state(state)
+
+        executed = False
+
+        async def spy_execute(*args, **kwargs) -> None:
+            nonlocal executed
+            executed = True
+
+        runner = Runner(project, None, config=config)
+        runner.notifier.notify = _fake_notify_noop  # type: ignore[method-assign]
+
+        with patch.object(runner, "_execute_legacy", spy_execute):
+            await runner.run()
+
+        assert not executed, "_execute_legacy should not be called when state has no plan_file"

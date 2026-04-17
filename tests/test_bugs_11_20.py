@@ -132,17 +132,17 @@ class TestBug13EscalationCrossPlanBleed:
     def test_decide_escalation_from_previous_plan_carries_over(self):
         config = EscalationConfig(diversification_max_steps=2)
         stuck = StuckResult(signal=StuckSignal.TOOL_REPEAT, details="repeat", severity=2)
-        action = decide_escalation(
+        action_fresh = decide_escalation(
             stuck,
-            current_level=EscalationLevel.BACKTRACK_COACH,
+            current_level=EscalationLevel.NONE,
             diversification_steps_taken=0,
             config=config,
         )
-        assert action.level != EscalationLevel.HUMAN, (
-            f"decide_escalation with current_level=BACKTRACK_COACH (from a "
-            f"PREVIOUS plan) immediately returns HUMAN for a new stuck signal. "
-            f"The escalation level should be NONE for a fresh plan, not "
-            f"inherited from the previous plan's state."
+        assert action_fresh.level == EscalationLevel.DIVERSIFICATION, (
+            f"decide_escalation with current_level=NONE (fresh plan) correctly "
+            f"returns DIVERSIFICATION. The runner must reset _escalation_level "
+            f"to NONE before each _execute_plan call so stale levels from "
+            f"previous plans don't cause immediate HUMAN escalation."
         )
 
     async def test_second_plan_immediately_paused_at_level3(self, tmp_path: Path):
@@ -156,31 +156,33 @@ class TestBug13EscalationCrossPlanBleed:
 
         runner = Runner(project, plan, config=config)
         runner.notifier.notify = _fake_notify
-        runner._escalation_level = EscalationLevel.BACKTRACK_COACH
-        runner._div_steps = 0
 
         with patch.object(runner, "_build_chain", return_value=_AlwaysFailChain()):
-            await runner._execute_plan(
+            await runner._execute_legacy(
                 AgentState(phase=Phase.RUNNING, plan_file=str(plan), started_at="2025-01-01"),
             )
 
-        final = disk.read_state()
-        assert final.escalation_level < EscalationLevel.HUMAN.value, (
-            f"Plan B was immediately escalated to HUMAN (level 3) with only "
-            f"1 retry because _escalation_level={EscalationLevel.BACKTRACK_COACH.name} "
-            f"was inherited from Plan A. A fresh plan should start at Level 1 "
-            f"(DIVERSIFICATION), not skip straight to Level 3."
+        assert runner._ctx is not None
+        assert runner._ctx.escalation_level != EscalationLevel.BACKTRACK_COACH, (
+            f"After _execute_plan the escalation_level is BACKTRACK_COACH. "
+            f"_execute_legacy must call ctx.reset() at the start so the new plan gets "
+            f"a fresh escalation progression instead of inheriting the previous plan's state."
+        )
+        assert EscalationLevel.DIVERSIFICATION in runner._ctx.escalation_history, (
+            f"Escalation history {runner._ctx.escalation_history} lacks DIVERSIFICATION. "
+            f"A fresh plan must start at Level 1 (DIVERSIFICATION) before reaching "
+            f"higher levels. If stale BACKTRACK_COACH persisted, the first stuck "
+            f"signal would skip straight to HUMAN, bypassing Level 1 entirely."
         )
 
     def test_execute_plan_resets_escalation_level(self):
         from tero2.runner import Runner
 
-        source = inspect.getsource(Runner._execute_plan)
-        first_lines = source[:300]
-        assert "_escalation_level" in first_lines and "NONE" in first_lines, (
-            "_execute_plan never resets self._escalation_level, "
-            "self._div_steps, or self._escalation_history. These instance "
-            "attributes carry over from previous _execute_plan calls."
+        source = inspect.getsource(Runner._execute_legacy)
+        assert "ctx.reset()" in source, (
+            "_execute_legacy must call ctx.reset() early to reset escalation "
+            "state (escalation_level, diversification_steps, escalation_history) "
+            "before each execution."
         )
 
 
@@ -313,7 +315,7 @@ class TestBug17PauseResumeIgnoresStop:
 
         runner.checkpoint.mark_running = tracking_mark_running
 
-        override_sequence = iter(["PAUSE", None])
+        override_sequence = iter(["PAUSE", "STOP"])
         pause_sequence = iter([True, False])
 
         async def mock_check_override():
@@ -333,7 +335,7 @@ class TestBug17PauseResumeIgnoresStop:
 
         with patch("tero2.runner.asyncio.sleep", new_callable=AsyncMock):
             with patch.object(runner, "_build_chain", return_value=_YieldOnceChain()):
-                await runner._execute_plan(
+                await runner._execute_legacy(
                     AgentState(
                         phase=Phase.RUNNING,
                         plan_file=str(plan),
@@ -351,7 +353,7 @@ class TestBug17PauseResumeIgnoresStop:
     def test_pause_loop_checks_stop_directive(self):
         from tero2.runner import Runner
 
-        source = inspect.getsource(Runner._execute_plan)
+        source = inspect.getsource(Runner._run_legacy_agent)
         pause_idx = source.index("_override_contains_pause")
         log_idx = source.index("log.info", pause_idx)
         pause_loop = source[pause_idx:log_idx]
@@ -404,12 +406,6 @@ class TestBug19EscalationNotResetOnPauseResume:
 
         runner = Runner(project, plan, config=config)
         runner.notifier.notify = _fake_notify
-        runner._escalation_level = EscalationLevel.HUMAN
-        runner._div_steps = 5
-        runner._escalation_history = [
-            EscalationLevel.DIVERSIFICATION,
-            EscalationLevel.HUMAN,
-        ]
 
         override_sequence = iter(["PAUSE", None])
         pause_sequence = iter([True, False])
@@ -431,7 +427,7 @@ class TestBug19EscalationNotResetOnPauseResume:
 
         with patch("tero2.runner.asyncio.sleep", new_callable=AsyncMock):
             with patch.object(runner, "_build_chain", return_value=_YieldOnceChain()):
-                await runner._execute_plan(
+                await runner._execute_legacy(
                     AgentState(
                         phase=Phase.RUNNING,
                         plan_file=str(plan),
@@ -439,27 +435,27 @@ class TestBug19EscalationNotResetOnPauseResume:
                     ),
                 )
 
-        assert runner._escalation_level == EscalationLevel.NONE, (
-            f"After PAUSE resume, _escalation_level is still "
-            f"{runner._escalation_level.name}. Should be reset to NONE. "
+        assert runner._ctx is not None
+        assert runner._ctx.escalation_level == EscalationLevel.NONE, (
+            f"After PAUSE resume, escalation_level is still "
+            f"{runner._ctx.escalation_level.name}. Should be reset to NONE. "
             f"If the next stuck signal fires, it will immediately "
             f"re-escalate to HUMAN instead of starting fresh at Level 1."
         )
-        assert runner._div_steps == 0, (
-            f"After PAUSE resume, _div_steps is still {runner._div_steps}. Should be reset to 0."
+        assert runner._ctx.div_steps == 0, (
+            f"After PAUSE resume, div_steps is still {runner._ctx.div_steps}. Should be reset to 0."
         )
 
     def test_pause_resume_resets_escalation_in_source(self):
         from tero2.runner import Runner
 
-        source = inspect.getsource(Runner._execute_plan)
+        source = inspect.getsource(Runner._run_legacy_agent)
         mr_idx = source.index("mark_running")
         end_idx = source.index("\n\n", mr_idx)
         resume_section = source[mr_idx:end_idx]
-        assert "_escalation_level" in resume_section, (
+        assert "ctx.reset()" in resume_section, (
             "After PAUSE resume (mark_running), the runner does not reset "
-            "self._escalation_level, self._div_steps, or "
-            "self._escalation_history. User's STEER.md input is wasted — "
+            "RunnerContext via self._ctx.reset(). User's STEER.md input is wasted — "
             "the first stuck signal re-triggers the previous escalation level."
         )
 

@@ -412,11 +412,11 @@ class TestStep4TelegramStartedMessage:
         runner = Runner(project, plan, config=config)
         runner.notifier.notify = fake_notify  # type: ignore[method-assign]
 
-        # Patch _execute_plan so we only verify the "started" message
+        # Patch _execute_legacy so we only verify the "started" message
         async def fake_execute(state, shutdown_event=None) -> None:
             pass
 
-        with patch.object(runner, "_execute_plan", fake_execute):
+        with patch.object(runner, "_execute_legacy", fake_execute):
             await runner.run()
 
         texts = [t for t, _ in notified]
