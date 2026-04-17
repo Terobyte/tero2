@@ -1,0 +1,29 @@
+/* Full-screen layout */
+Screen {
+    layout: vertical;
+}
+
+PipelinePanel {
+    height: auto;
+}
+
+/* Main content area: log on left, usage on right */
+#main-row {
+    layout: horizontal;
+    height: 1fr;
+}
+
+LogView {
+    width: 3fr;
+}
+
+UsagePanel {
+    width: 1fr;
+    min-width: 24;
+    max-width: 40;
+}
+
+ControlsPanel {
+    height: 1;
+    dock: bottom;
+}
