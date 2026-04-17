@@ -71,7 +71,7 @@ class UsageTracker:
 
     async def _refresh_limits(self) -> None:
         """Fetch limits and update cached value (thread-safe via asyncio lock)."""
-        limits = await asyncio.get_event_loop().run_in_executor(None, self.fetch_limits)
+        limits = await asyncio.get_running_loop().run_in_executor(None, self.fetch_limits)
         async with self._limits_lock:
             self._limits = limits
 
