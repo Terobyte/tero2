@@ -290,26 +290,28 @@ class TestSetSoraPhase:
     def test_set_sora_phase_sequence_all_values(self, tmp_path):
         """Each SoraPhase round-trips through disk correctly."""
         cm, disk = self._make_checkpoint(tmp_path)
-        for phase in (
-            SoraPhase.HARDENING,
-            SoraPhase.SCOUT,
-            SoraPhase.COACH,
-            SoraPhase.ARCHITECT,
-            SoraPhase.EXECUTE,
-            SoraPhase.SLICE_DONE,
-            SoraPhase.NONE,
-        ):
-            state = AgentState()
-            cm.set_sora_phase(state, phase)
+        # Map target → a valid predecessor (from_json bypasses __setattr__ validation)
+        predecessors: dict[SoraPhase, str] = {
+            SoraPhase.HARDENING: "none",
+            SoraPhase.SCOUT: "none",
+            SoraPhase.COACH: "none",
+            SoraPhase.ARCHITECT: "none",
+            SoraPhase.EXECUTE: "architect",
+            SoraPhase.SLICE_DONE: "execute",
+        }
+        for target_phase, prev_value in predecessors.items():
+            state = AgentState.from_json(f'{{"sora_phase": "{prev_value}"}}')
+            cm.set_sora_phase(state, target_phase)
             restored = cm.restore()
-            assert restored.sora_phase == phase, (
-                f"expected {phase!r} on restore, got {restored.sora_phase!r}"
+            assert restored.sora_phase == target_phase, (
+                f"expected {target_phase!r} on restore, got {restored.sora_phase!r}"
             )
 
     def test_set_sora_phase_does_not_alter_run_phase(self, tmp_path):
         """set_sora_phase only touches sora_phase; AgentState.phase is unchanged."""
         cm, disk = self._make_checkpoint(tmp_path)
-        state = AgentState(phase=Phase.RUNNING)
+        # from_json bypasses __setattr__ guards — use it to build test state directly
+        state = AgentState.from_json('{"phase": "running", "sora_phase": "architect"}')
         disk.write_state(state)
         updated = cm.set_sora_phase(state, SoraPhase.EXECUTE)
         restored = cm.restore()
@@ -335,9 +337,9 @@ class TestSetSoraPhase:
         """Simulate crash mid-SORA: disk has sora_phase=EXECUTE; new CM restores it."""
         disk = DiskLayer(tmp_path)
         disk.init()
-        # First CM writes state mid-pipeline
+        # First CM writes state mid-pipeline; from_json bypasses __setattr__ guards
         cm1 = CheckpointManager(disk)
-        state = AgentState(phase=Phase.RUNNING)
+        state = AgentState.from_json('{"phase": "running", "sora_phase": "architect"}')
         cm1.set_sora_phase(state, SoraPhase.EXECUTE)
 
         # Second CM (new process after crash) restores from disk

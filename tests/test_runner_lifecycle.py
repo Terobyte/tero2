@@ -20,7 +20,7 @@ from tero2.disk_layer import DiskLayer
 from tero2.lock import FileLock
 from tero2.notifier import NotifyLevel
 from tero2.runner import Runner
-from tero2.state import Phase
+from tero2.state import AgentState, Phase
 
 
 # ── helpers ──────────────────────────────────────────────────────────
@@ -252,10 +252,13 @@ class TestOptionalPlanFile:
         """PAUSED checkpoint + plan_file=None → runner resumes and completes."""
         project, plan, config, disk = _make_project(tmp_path)
 
-        state = disk.read_state()
-        state.phase = Phase.PAUSED
-        state.plan_file = str(plan)
-        state.started_at = "2026-01-01T00:00:00Z"
+        # from_json bypasses __setattr__ transition guards for test setup
+        import json
+        state = AgentState.from_json(json.dumps({
+            "phase": "paused",
+            "plan_file": str(plan),
+            "started_at": "2026-01-01T00:00:00Z",
+        }))
         disk.write_state(state)
 
         runner = Runner(project, None, config=config)
