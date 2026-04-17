@@ -18,6 +18,16 @@ class Phase(str, Enum):
     FAILED = "failed"
 
 
+class SoraPhase(str, Enum):
+    NONE = "none"
+    HARDENING = "hardening"
+    SCOUT = "scout"
+    COACH = "coach"
+    ARCHITECT = "architect"
+    EXECUTE = "execute"
+    SLICE_DONE = "slice_done"
+
+
 @dataclass
 class AgentState:
     phase: Phase = Phase.IDLE
