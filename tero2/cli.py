@@ -6,6 +6,7 @@ Commands:
     tero2 init <project_path>                    — initialize .sora/ structure
     tero2 telegram                               — start Telegram plan-input bot
     tero2 harden <project_path> --plan <plan.md> — harden plan with Reviewer loop
+    tero2 go <project_path>                      — launch TUI dashboard
 """
 
 from __future__ import annotations
@@ -72,7 +73,7 @@ def cmd_status(args: argparse.Namespace) -> None:
         print("not initialized — run `tero2 init` first")
         return
 
-    from tero2.state import AgentState
+    from tero2.state import AgentState, SoraPhase
 
     state = AgentState.from_file(state_file)
     print(f"phase:    {state.phase.value}")
@@ -82,6 +83,75 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(f"checkpoint: {state.last_checkpoint or '(none)'}")
     if state.error_message:
         print(f"error:    {state.error_message}")
+
+    # SORA fields
+    if state.sora_phase != SoraPhase.NONE:
+        print(f"sora_phase: {state.sora_phase.value}")
+    if state.sora_phase == SoraPhase.EXECUTE and state.current_slice:
+        print(f"slice:    {state.current_slice}  task: {state.current_task_index}")
+
+
+def cmd_go(args: argparse.Namespace) -> None:
+    try:
+        from textual import __version__ as _  # noqa: F401
+    except ImportError:
+        print("textual not installed — run: pip install tero2[tui]", file=sys.stderr)
+        sys.exit(1)
+
+    from tero2.events import Command, EventDispatcher
+    from tero2.config import load_config
+    from tero2.runner import Runner
+    from tero2.tui.app import DashboardApp
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+
+    project_path = Path(args.project_path).expanduser().resolve()
+
+    if not project_path.is_dir():
+        print(f"error: {project_path} is not a directory")
+        sys.exit(1)
+
+    plan_file = None
+    if args.plan:
+        pf = Path(args.plan).expanduser()
+        if not pf.is_absolute():
+            pf = (project_path / pf).resolve()
+        else:
+            pf = pf.resolve()
+        if not pf.is_file():
+            print(f"error: plan file not found: {pf}")
+            sys.exit(1)
+        plan_file = pf
+
+    config = None
+    if args.config:
+        config_path = Path(args.config).expanduser().resolve()
+        if not config_path.is_file():
+            print(f"error: config file not found: {config_path}")
+            sys.exit(1)
+        config = load_config(project_path, override_path=config_path)
+    else:
+        config = load_config(project_path)
+
+    if args.idle_timeout:
+        config.idle_timeout_s = args.idle_timeout
+
+    dispatcher = EventDispatcher()
+    command_queue: asyncio.Queue[Command] = asyncio.Queue()
+
+    runner = Runner(
+        project_path,
+        plan_file,
+        config=config,
+        dispatcher=dispatcher,
+        command_queue=command_queue,
+    )
+
+    app = DashboardApp(runner=runner, dispatcher=dispatcher, command_queue=command_queue)
+    app.run()
 
 
 def cmd_init(args: argparse.Namespace) -> None:
@@ -215,6 +285,20 @@ def _build_parser() -> argparse.ArgumentParser:
     telegram_parser.add_argument("--project", help="Project path (default: cwd)", default=None)
     telegram_parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
     telegram_parser.set_defaults(func=cmd_telegram)
+
+    go_parser = subparsers.add_parser("go", help="Launch TUI dashboard")
+    go_parser.add_argument("project_path", help="Path to the project root")
+    go_parser.add_argument("--plan", help="Path to the markdown plan file (optional)")
+    go_parser.add_argument(
+        "--idle-timeout",
+        type=int,
+        default=0,
+        dest="idle_timeout",
+        help="Exit after N seconds idle (0 = never)",
+    )
+    go_parser.add_argument("--config", help="Override config file path")
+    go_parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
+    go_parser.set_defaults(func=cmd_go)
 
     harden_parser = subparsers.add_parser(
         "harden", help="Harden a plan with Reviewer convergence loop"
