@@ -1,6 +1,6 @@
 # TUI Redesign M1 — MVP Wizard Implementation Plan
 
-> **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** `tero2 go` without args opens a startup wizard (project pick → plan pick) → launches DashboardApp. `tero2 go <path>` continues to work. ControlsPanel replaced with StuckHintWidget.
 
@@ -868,11 +868,11 @@ git commit -m "add PlanPickScreen for wizard step 2"
 ### Task 7: ProjectPickScreen + StartupWizard
 
 **Files:**
-- [ ] Create: `tero2/tui/screens/project_pick.py`
-- [ ] Create: `tero2/tui/screens/startup_wizard.py`
-- [ ] Create: `tests/test_startup_wizard.py`
+- [x] Create: `tero2/tui/screens/project_pick.py`
+- [x] Create: `tero2/tui/screens/startup_wizard.py`
+- [x] Create: `tests/test_startup_wizard.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_startup_wizard.py
@@ -957,14 +957,14 @@ async def test_startup_wizard_composes():
             assert len(app.screen_stack) >= 2
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 ```
 pytest tests/test_startup_wizard.py -v
 ```
 Expected: `ImportError: cannot import name 'ProjectPickScreen'`
 
-- [ ] **Step 3: Implement ProjectPickScreen**
+- [x] **Step 3: Implement ProjectPickScreen**
 
 ```python
 # tero2/tui/screens/project_pick.py
@@ -1044,7 +1044,7 @@ class ProjectPickScreen(ModalScreen[Path | None]):
         self.dismiss(None)
 ```
 
-- [ ] **Step 4: Implement StartupWizard**
+- [x] **Step 4: Implement StartupWizard**
 
 ```python
 # tero2/tui/screens/startup_wizard.py
@@ -1082,14 +1082,14 @@ class StartupWizard(Screen[tuple[Path, Path | None] | None]):
         )
 ```
 
-- [ ] **Step 5: Run tests to verify pass**
+- [x] **Step 5: Run tests to verify pass**
 
 ```
 pytest tests/test_startup_wizard.py -v
 ```
 Expected: all PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tero2/tui/screens/project_pick.py tero2/tui/screens/startup_wizard.py tests/test_startup_wizard.py
@@ -1103,10 +1103,10 @@ git commit -m "add ProjectPickScreen and StartupWizard"
 ### Task 8: cli.py — optional project_path + wizard launch
 
 **Files:**
-- [ ] Modify: `tero2/cli.py`
-- [ ] Create: `tests/test_cli_wizard.py`
+- [x] Modify: `tero2/cli.py`
+- [x] Create: `tests/test_cli_wizard.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 **⚠️ Note on parser naming:** the existing function in `tero2/cli.py:264` is `_build_parser()` (private). This plan makes it public as `build_parser` (rename) since we need a public testing surface. The underscore version is removed — no alias kept because it has no external callers in main (only tests from M1 use it).
 
@@ -1151,14 +1151,14 @@ def test_cmd_go_calls_wizard_when_no_path(tmp_path):
         mock_wizard.assert_called_once()
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 ```
 pytest tests/test_cli_wizard.py::test_go_parser_allows_no_project_path -v
 ```
 Expected: FAIL — `project_path` is required
 
-- [ ] **Step 3: Modify cli.py**
+- [x] **Step 3: Modify cli.py**
 
 Rename `_build_parser()` → `build_parser()` at `tero2/cli.py:264` (public testing surface). Update any internal callers (e.g. in `main()`) to use the new name.
 
@@ -1207,21 +1207,21 @@ def cmd_go(args) -> None:
     # ... rest of existing cmd_go logic continues unchanged
 ```
 
-- [ ] **Step 4: Run tests to verify pass**
+- [x] **Step 4: Run tests to verify pass**
 
 ```
 pytest tests/test_cli_wizard.py -v
 ```
 Expected: all PASS
 
-- [ ] **Step 5: Verify regression — existing go path still works**
+- [x] **Step 5: Verify regression — existing go path still works**
 
 ```
 pytest tests/ -k "tui" -v
 ```
 Expected: all pre-existing TUI tests still PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tero2/cli.py tests/test_cli_wizard.py
@@ -1233,10 +1233,10 @@ git commit -m "make project_path optional in go subcommand, wire startup wizard"
 ### Task 9: record_run call in cmd_go
 
 **Files:**
-- [ ] Modify: `tero2/cli.py`
-- [ ] Modify: `tests/test_cli_wizard.py`
+- [x] Modify: `tero2/cli.py`
+- [x] Modify: `tests/test_cli_wizard.py`
 
-- [ ] **Step 1: Add test for history recording**
+- [x] **Step 1: Add test for history recording**
 
 Add to `tests/test_cli_wizard.py`:
 ```python
@@ -1262,14 +1262,14 @@ def test_cmd_go_records_history_on_launch(tmp_path, monkeypatch):
     assert recorded[0][0] == tmp_path
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 ```
 pytest tests/test_cli_wizard.py::test_cmd_go_records_history_on_launch -v
 ```
 Expected: FAIL — `record_run` not called yet
 
-- [ ] **Step 3: Add record_run call to cmd_go**
+- [x] **Step 3: Add record_run call to cmd_go**
 
 In `tero2/cli.py`, add import at top:
 ```python
@@ -1281,14 +1281,14 @@ After `DashboardApp(...).run()` succeeds in `cmd_go`, add:
 record_run(project_path, plan_file)
 ```
 
-- [ ] **Step 4: Run tests to verify pass**
+- [x] **Step 4: Run tests to verify pass**
 
 ```
 pytest tests/test_cli_wizard.py -v
 ```
 Expected: all PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tero2/cli.py tests/test_cli_wizard.py
@@ -1302,9 +1302,9 @@ git commit -m "record project run in history after DashboardApp launch"
 ### Task 10: Integration smoke test + full suite
 
 **Files:**
-- [ ] Create: `tests/test_m1_integration.py`
+- [x] Create: `tests/test_m1_integration.py`
 
-- [ ] **Step 1: Write integration test**
+- [x] **Step 1: Write integration test**
 
 ```python
 # tests/test_m1_integration.py
@@ -1368,21 +1368,21 @@ async def test_dashboard_app_no_controls_panel():
         app.query_one("#stuck-hint", StuckHintWidget)  # must exist
 ```
 
-- [ ] **Step 2: Run integration tests**
+- [x] **Step 2: Run integration tests**
 
 ```
 pytest tests/test_m1_integration.py -v
 ```
 Expected: all PASS
 
-- [ ] **Step 3: Run full test suite to verify no regressions**
+- [x] **Step 3: Run full test suite to verify no regressions**
 
 ```
 pytest tests/ -v --tb=short
 ```
 Expected: all pre-existing tests PASS, new tests PASS
 
-- [ ] **Step 4: Final M1 commit**
+- [x] **Step 4: Final M1 commit**
 
 ```bash
 git add tests/test_m1_integration.py
@@ -1394,12 +1394,12 @@ git commit -m "m1 integration tests: wizard path, no controls panel, no regressi
 ## Summary
 
 After M1 completion:
-- [ ] `tero2 go` without args opens wizard → DashboardApp (no crash)
-- [ ] `tero2 go <path>` works as before (regression-free)
-- [ ] ControlsPanel deleted, StuckHintWidget shows during stuck state
-- [ ] Footer replaces ControlsPanel hotkey display
-- [ ] Stuck options `[1-5]` hidden from Footer until stuck state, with readable labels
-- [ ] `[s]` labeled "Указание" (was "Стир")
-- [ ] Project run history in `~/.tero2/history.json`
-- [ ] `[l]` changes plan (sends `new_plan` command — works in idle, warns in active)
-- [ ] `[n]` and `[o]` are stubs (M2/M3)
+- [x] `tero2 go` without args opens wizard → DashboardApp (no crash)
+- [x] `tero2 go <path>` works as before (regression-free)
+- [x] ControlsPanel deleted, StuckHintWidget shows during stuck state
+- [x] Footer replaces ControlsPanel hotkey display
+- [x] Stuck options `[1-5]` hidden from Footer until stuck state, with readable labels
+- [x] `[s]` labeled "Указание" (was "Стир")
+- [x] Project run history in `~/.tero2/history.json`
+- [x] `[l]` changes plan (sends `new_plan` command — works in idle, warns in active)
+- [x] `[n]` and `[o]` are stubs (M2/M3)
