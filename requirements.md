@@ -70,7 +70,7 @@ pytest tests/test_constants.py tests/test_players.py -v
 ```
 Expected: all PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tero2/constants.py tero2/players/scout.py tests/test_constants.py
@@ -82,10 +82,10 @@ git commit -m "move _SKIP_DIRS to constants.PROJECT_SCAN_SKIP_DIRS"
 ### Task 2: tero2/history.py — project run history
 
 **Files:**
-- [ ] Create: `tero2/history.py`
-- [ ] Create: `tests/test_history.py`
+- [x] Create: `tero2/history.py`
+- [x] Create: `tests/test_history.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_history.py
@@ -146,14 +146,14 @@ def test_trim_history_keeps_newest(tmp_path, monkeypatch):
     assert len(entries) == 20  # default max_entries
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 ```
 pytest tests/test_history.py -v
 ```
 Expected: `ModuleNotFoundError: No module named 'tero2.history'`
 
-- [ ] **Step 3: Implement tero2/history.py**
+- [x] **Step 3: Implement tero2/history.py**
 
 ```python
 """Project run history — reads/writes ~/.tero2/history.json."""
@@ -226,7 +226,7 @@ def _write(entries: list[HistoryEntry]) -> None:
     tmp.replace(HISTORY_FILE)
 ```
 
-- [ ] **Step 4: Run tests to verify pass**
+- [x] **Step 4: Run tests to verify pass**
 
 ```
 pytest tests/test_history.py -v
