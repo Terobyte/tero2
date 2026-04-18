@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -156,6 +155,9 @@ class TestBug66CompletedExistsCheck:
             f"Got completed={completed}"
         )
         assert "T02" in completed, "T02 ran and passed — must be in completed"
+        assert result.success is False, (
+            "A skipped task with a missing summary must cause the run to fail"
+        )
 
 
 # ── Bug 70: resolve().is_relative_to(project_path) guard ─────────────────

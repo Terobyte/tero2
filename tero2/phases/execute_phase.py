@@ -142,6 +142,12 @@ async def run_execute(
             summary_path = f"{slice_plan.slice_dir}/{task.id}-SUMMARY.md"
             if (ctx.disk.sora_dir / summary_path).exists():
                 completed[task.id] = summary_path
+            else:
+                log.warning(
+                    "execute: skipped task %s has no summary on disk — marking run failed",
+                    task.id,
+                )
+                all_passed = False
             continue
 
         # ── Task-boundary safety checks ───────────────────────────────────

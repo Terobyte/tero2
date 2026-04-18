@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -155,7 +153,7 @@ class TestBug69StdinWriteNoBrokenPipeGuard:
 
             async def empty_lines():
                 return
-                yield  # noqa: unreachable
+                yield  # makes empty_lines() an async generator, not a coroutine
 
             proc.stdout.__aiter__ = lambda self: empty_lines()
 
