@@ -23,7 +23,28 @@ UsagePanel {
     max-width: 40;
 }
 
-ControlsPanel {
-    height: 1;
-    dock: bottom;
+/* ProjectPickScreen / PlanPickScreen */
+ProjectPickScreen,
+PlanPickScreen {
+    background: $surface;
+    border: thick $primary;
+    height: auto;
+    max-height: 80%;
+    width: 80%;
+    margin: 2 4;
+}
+
+ProjectPickScreen ListView,
+PlanPickScreen ListView {
+    height: auto;
+    max-height: 20;
+}
+
+ProjectPickScreen .path-label,
+PlanPickScreen .path-label {
+    color: $text-muted;
+}
+
+ProjectPickScreen .entry-warning {
+    color: $warning;
 }

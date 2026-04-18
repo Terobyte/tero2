@@ -63,21 +63,21 @@ async def test_stuck_option_clears_stuck_mode() -> None:
     """action_stuck_option_1() puts steer command and clears stuck_mode."""
     app, q = _make_app()
     async with app.run_test(headless=True, size=(120, 30)) as pilot:
-        # manually set stuck_mode on pipeline and controls
-        from tero2.tui.widgets.controls import ControlsPanel
+        # manually set stuck_mode on pipeline and show stuck hint
         from tero2.tui.widgets.pipeline import PipelinePanel
+        from tero2.tui.widgets.stuck_hint import StuckHintWidget
 
         pipeline = app.query_one("#pipeline", PipelinePanel)
-        controls = app.query_one("#controls", ControlsPanel)
+        stuck_hint = app.query_one("#stuck-hint", StuckHintWidget)
         pipeline.stuck_mode = True
-        controls.stuck_mode = True
+        stuck_hint.display = True
 
         await pilot.press("1")
         await pilot.pause()
 
         # stuck_mode should be cleared
         assert pipeline.stuck_mode is False
-        assert controls.stuck_mode is False
+        assert stuck_hint.display is False
 
     assert not q.empty()
     cmd = q.get_nowait()

@@ -7,6 +7,7 @@ from typing import ClassVar
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal
+from textual.widgets import Footer, Header
 from textual.worker import WorkerState
 
 from tero2.events import Command, EventDispatcher
@@ -14,9 +15,9 @@ from tero2.runner import Runner
 from tero2.state import SoraPhase
 from tero2.tui.screens.role_swap import RoleSwapScreen, SwitchProviderMessage
 from tero2.tui.screens.steer import SteerMessage, SteerScreen
-from tero2.tui.widgets.controls import ControlsPanel
 from tero2.tui.widgets.log_view import LogView
 from tero2.tui.widgets.pipeline import PipelinePanel
+from tero2.tui.widgets.stuck_hint import StuckHintWidget
 from tero2.tui.widgets.usage import UsagePanel
 
 
@@ -27,15 +28,18 @@ class DashboardApp(App):
 
     BINDINGS: ClassVar[list] = [
         ("r", "roles", "Роли"),
-        ("s", "steer", "Стир"),
+        ("s", "steer", "Указание"),
         ("p", "pause", "Пауза"),
         ("q", "quit", "Выход"),
         ("k", "skip", "Пропустить"),
-        ("1", "stuck_option_1", ""),
-        ("2", "stuck_option_2", ""),
-        ("3", "stuck_option_3", ""),
-        ("4", "stuck_option_4", ""),
-        ("5", "stuck_option_5", ""),
+        ("l", "change_plan", "Смена плана"),
+        ("n", "new_project", "Новый"),
+        ("o", "settings", "Настройки"),
+        ("1", "stuck_option_1", "1 retry"),
+        ("2", "stuck_option_2", "2 switch"),
+        ("3", "stuck_option_3", "3 skip"),
+        ("4", "stuck_option_4", "4 escalate"),
+        ("5", "stuck_option_5", "5 manual"),
     ]
 
     def __init__(
@@ -54,11 +58,13 @@ class DashboardApp(App):
     # ── compose ──────────────────────────────────────────────────────────────
 
     def compose(self) -> ComposeResult:
+        yield Header()
         yield PipelinePanel(id="pipeline")
         with Horizontal(id="main-row"):
             yield LogView(id="log-view")
             yield UsagePanel(id="usage-panel")
-        yield ControlsPanel(id="controls")
+        yield StuckHintWidget(id="stuck-hint")
+        yield Footer()
 
     # ── lifecycle ────────────────────────────────────────────────────────────
 
@@ -85,7 +91,7 @@ class DashboardApp(App):
             pipeline = self.query_one("#pipeline", PipelinePanel)
             log_view = self.query_one("#log-view", LogView)
             usage_panel = self.query_one("#usage-panel", UsagePanel)
-            controls = self.query_one("#controls", ControlsPanel)
+            stuck_hint = self.query_one("#stuck-hint", StuckHintWidget)
 
             # route by event kind
             if event.kind == "phase_change":
@@ -104,12 +110,12 @@ class DashboardApp(App):
 
             elif event.kind == "stuck":
                 pipeline.stuck_mode = True
-                controls.stuck_mode = True
+                stuck_hint.display = True
 
             elif event.kind == "done":
                 log_view.push_message("Задание выполнено.", style="green bold")
                 pipeline.stuck_mode = False
-                controls.stuck_mode = False
+                stuck_hint.display = False
 
             elif event.kind == "error":
                 msg = event.data.get("message") or event.data.get("msg") or "ошибка"
@@ -143,11 +149,54 @@ class DashboardApp(App):
     def action_skip(self) -> None:
         self._command_queue.put_nowait(Command("skip_task", source="tui"))
 
+    def action_change_plan(self) -> None:
+        project_path = getattr(self._runner, "project_path", None)
+        if project_path is None:
+            log_view = self.query_one("#log-view", LogView)
+            log_view.push_message(
+                "Смена плана недоступна: проект не задан.",
+                style="yellow",
+            )
+            return
+
+        from tero2.tui.screens.plan_pick import PlanPickScreen
+
+        def _on_plan_selected(plan_file) -> None:
+            if plan_file is not None:
+                self._command_queue.put_nowait(
+                    Command("new_plan", data={"text": str(plan_file)}, source="tui")
+                )
+
+        self.push_screen(PlanPickScreen(project_path), _on_plan_selected)
+
+    def action_new_project(self) -> None:
+        # M2: launch StartupWizard with callback to replace current runner
+        log_view = self.query_one("#log-view", LogView)
+        log_view.push_message("Смена проекта — будет в M2.", style="yellow")
+
+    def action_settings(self) -> None:
+        # M3: open SettingsScreen
+        log_view = self.query_one("#log-view", LogView)
+        log_view.push_message("Настройки — будут в M3.", style="yellow")
+
+    def check_action(self, action: str, parameters: tuple) -> bool:
+        stuck_actions = {
+            "stuck_option_1", "stuck_option_2", "stuck_option_3",
+            "stuck_option_4", "stuck_option_5",
+        }
+        if action in stuck_actions:
+            try:
+                hint = self.query_one("#stuck-hint", StuckHintWidget)
+                return bool(hint.display)
+            except Exception:
+                return False
+        return True
+
     def _clear_stuck_mode(self) -> None:
         pipeline = self.query_one("#pipeline", PipelinePanel)
-        controls = self.query_one("#controls", ControlsPanel)
+        stuck_hint = self.query_one("#stuck-hint", StuckHintWidget)
         pipeline.stuck_mode = False
-        controls.stuck_mode = False
+        stuck_hint.display = False
 
     def action_stuck_option_1(self) -> None:
         self._command_queue.put_nowait(
