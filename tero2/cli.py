@@ -17,6 +17,8 @@ import logging
 import sys
 from pathlib import Path
 
+from tero2.history import record_run
+
 
 def main() -> None:
     parser = build_parser()
@@ -184,6 +186,7 @@ def cmd_go(args: argparse.Namespace) -> None:
 
     app = DashboardApp(runner=runner, dispatcher=dispatcher, command_queue=command_queue)
     app.run()
+    record_run(project_path, plan_file)
 
 
 def cmd_init(args: argparse.Namespace) -> None:
