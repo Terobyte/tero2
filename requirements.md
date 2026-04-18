@@ -341,7 +341,7 @@ pytest tests/test_stuck_hint.py -v
 ```
 Expected: all PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tero2/tui/widgets/stuck_hint.py tests/test_stuck_hint.py
@@ -355,10 +355,10 @@ git commit -m "add StuckHintWidget for stuck-state visibility"
 ### Task 4: Migrate app.py — ControlsPanel → StuckHintWidget
 
 **Files:**
-- [ ] Modify: `tero2/tui/app.py` (all ControlsPanel references)
-- [ ] Delete: `tero2/tui/widgets/controls.py`
-- [ ] Modify: `tero2/tui/styles.tcss`
-- [ ] Modify: `tests/test_tui_commands.py` (update references)
+- [x] Modify: `tero2/tui/app.py` (all ControlsPanel references)
+- [x] Delete: `tero2/tui/widgets/controls.py`
+- [x] Modify: `tero2/tui/styles.tcss`
+- [x] Modify: `tests/test_tui_commands.py` (update references)
 
 **Exact changes needed in app.py:**
 
@@ -375,11 +375,11 @@ git commit -m "add StuckHintWidget for stuck-state visibility"
 | 112 | `controls.stuck_mode = False` | `stuck_hint.display = False` |
 | 148-150 | `controls = self.query_one(...)` / `controls.stuck_mode = False` | `stuck_hint = self.query_one("#stuck-hint", StuckHintWidget)` / `stuck_hint.display = False` |
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 **⚠️ Gotchas baked into these tests:**
-- [ ] `make_event` signature is `role: str = ""` — passing `role=None` raises TypeError. Use `role=""`.
-- [ ] `on_mount` subscribes once and stores the returned queue in `self._event_queue`. The background worker captures that reference when it starts. Overwriting `app._event_queue = asyncio.Queue()` from the test has no effect — the worker keeps the old reference. Instead: push to the SAME queue the app has (they're the same object as `dispatcher.subscribe.return_value`).
+- [x] `make_event` signature is `role: str = ""` — passing `role=None` raises TypeError. Use `role=""`.
+- [x] `on_mount` subscribes once and stores the returned queue in `self._event_queue`. The background worker captures that reference when it starts. Overwriting `app._event_queue = asyncio.Queue()` from the test has no effect — the worker keeps the old reference. Instead: push to the SAME queue the app has (they're the same object as `dispatcher.subscribe.return_value`).
 
 ```python
 # tests/test_app_migration.py
@@ -446,25 +446,25 @@ async def test_stuck_hint_shown_after_stuck_event():
         assert widget.display is True
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 ```
 pytest tests/test_app_migration.py -v
 ```
 Expected: `FAIL test_no_controls_panel_in_dom` (ControlsPanel still exists)
 
-- [ ] **Step 3: Apply all changes to app.py**
+- [x] **Step 3: Apply all changes to app.py**
 
 Edit `tero2/tui/app.py`:
 
-- [ ] Replace line 17 (ControlsPanel import):
+- [x] Replace line 17 (ControlsPanel import):
 ```python
 from textual.widgets import Footer, Header
 
 from tero2.tui.widgets.stuck_hint import StuckHintWidget
 ```
 
-- [ ] Replace BINDINGS (lines 28-39):
+- [x] Replace BINDINGS (lines 28-39):
 ```python
 BINDINGS: ClassVar[list] = [
     ("r", "roles", "Роли"),
@@ -483,7 +483,7 @@ BINDINGS: ClassVar[list] = [
 ]
 ```
 
-- [ ] Replace compose() method:
+- [x] Replace compose() method:
 ```python
 def compose(self) -> ComposeResult:
     yield Header()
@@ -495,7 +495,7 @@ def compose(self) -> ComposeResult:
     yield Footer()
 ```
 
-- [ ] In `_consume_events()`, replace line 88:
+- [x] In `_consume_events()`, replace line 88:
 ```python
 stuck_hint = self.query_one("#stuck-hint", StuckHintWidget)
 ```
@@ -508,7 +508,7 @@ stuck_hint.display = True
 stuck_hint.display = False
 ```
 
-- [ ] Replace `_clear_stuck_mode()`:
+- [x] Replace `_clear_stuck_mode()`:
 ```python
 def _clear_stuck_mode(self) -> None:
     pipeline = self.query_one("#pipeline", PipelinePanel)
@@ -517,7 +517,7 @@ def _clear_stuck_mode(self) -> None:
     stuck_hint.display = False
 ```
 
-- [ ] Add `check_action()` method after `_clear_stuck_mode`:
+- [x] Add `check_action()` method after `_clear_stuck_mode`:
 ```python
 def check_action(self, action: str, parameters: tuple) -> bool:
     stuck_actions = {
@@ -533,7 +533,7 @@ def check_action(self, action: str, parameters: tuple) -> bool:
     return True
 ```
 
-- [ ] Add new action stubs after `action_skip`:
+- [x] Add new action stubs after `action_skip`:
 
 **⚠️ Guard against missing project_path:** `runner.project_path` can be `None` when the Runner was started via idle mode without a project (rare but possible). `PlanPickScreen.__init__` calls `.rglob("*.md")` on the path — passing `None` crashes with `AttributeError`. Guard before pushing the screen.
 
@@ -569,17 +569,17 @@ def action_settings(self) -> None:
     log_view.push_message("Настройки — будут в M3.", style="yellow")
 ```
 
-- [ ] **Step 4: Delete controls.py**
+- [x] **Step 4: Delete controls.py**
 
 ```bash
 rm tero2/tui/widgets/controls.py
 ```
 
-- [ ] **Step 5: Update existing test_tui_commands.py**
+- [x] **Step 5: Update existing test_tui_commands.py**
 
 In `tests/test_tui_commands.py`, find any references to `ControlsPanel` or `#controls` and replace with `StuckHintWidget` / `#stuck-hint` pattern.
 
-- [ ] **Step 6: Run all tests to verify pass**
+- [x] **Step 6: Run all tests to verify pass**
 
 ```
 pytest tests/test_app_migration.py tests/test_tui_commands.py tests/test_stuck_hint.py -v

@@ -6,6 +6,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from textual.widgets import Footer, Header
 
 from tero2.events import Command, EventDispatcher
 from tero2.tui.app import DashboardApp
@@ -114,3 +115,47 @@ async def test_steer_command() -> None:
     assert cmd.kind == "steer"
     assert cmd.data == {"text": "focus on tests"}
     assert cmd.source == "tui"
+
+
+@pytest.mark.asyncio
+async def test_change_plan_no_project_no_command() -> None:
+    """action_change_plan() with runner.project_path=None logs message, no command queued."""
+    app, q = _make_app()
+    app._runner.project_path = None
+    async with app.run_test(headless=True, size=(120, 30)) as pilot:
+        await pilot.press("l")
+        await pilot.pause()
+
+    assert q.empty()
+
+
+@pytest.mark.asyncio
+async def test_stuck_keys_ignored_when_not_stuck() -> None:
+    """Pressing stuck option keys when stuck_hint is hidden queues nothing."""
+    app, q = _make_app()
+    async with app.run_test(headless=True, size=(120, 30)) as pilot:
+        # stuck_hint.display is False by default → check_action returns False
+        await pilot.press("1")
+        await pilot.pause()
+
+    assert q.empty()
+
+
+@pytest.mark.asyncio
+async def test_header_and_footer_in_dom() -> None:
+    """DashboardApp composes Header and Footer (ControlsPanel removed)."""
+    app, _ = _make_app()
+    async with app.run_test(headless=True, size=(120, 30)) as pilot:
+        app.query_one(Header)
+        app.query_one(Footer)
+
+
+@pytest.mark.asyncio
+async def test_stuck_hint_hidden_by_default() -> None:
+    """StuckHintWidget starts with display=False on mount."""
+    from tero2.tui.widgets.stuck_hint import StuckHintWidget
+
+    app, _ = _make_app()
+    async with app.run_test(headless=True, size=(120, 30)) as pilot:
+        hint = app.query_one("#stuck-hint", StuckHintWidget)
+        assert hint.display is False

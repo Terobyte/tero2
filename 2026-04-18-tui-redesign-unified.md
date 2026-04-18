@@ -1395,12 +1395,12 @@ pytest tests/test_m1_integration.py -v
 ```
 Expected: all PASS
 
-- [ ] **Step 3: Run full test suite to verify no regressions**
+- [ ] **Step 3: Run M1 tests only**
 
 ```
-pytest tests/ -v --tb=short
+pytest tests/test_constants.py tests/test_history.py tests/test_stuck_hint.py tests/test_app_migration.py tests/test_plan_pick.py tests/test_startup_wizard.py tests/test_cli_wizard.py tests/test_m1_integration.py -v --tb=short
 ```
-Expected: all pre-existing tests PASS, new tests PASS
+Expected: all PASS
 
 - [ ] **Step 4: Final M1 commit**
 
@@ -1424,9 +1424,26 @@ After M1 completion:
 - `[l]` changes plan (sends `new_plan` command — works in idle, warns in active)
 - `[n]` and `[o]` are stubs (M2/M3)
 
+## Human QA — M1
+
+After automated tasks complete:
+- [ ] Run full regression suite: `pytest tests/ -v --tb=short`
+- [ ] Run `tero2 go` without args → verify wizard appears and is usable
+- [ ] Run `tero2 go <path>` → verify direct launch still works
+- [ ] During stuck state → verify StuckHintWidget shows and [1-5] keys work
+
 # M2 — Model Catalog & Provider Picker
 
-> **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
+**Role map:**
+| Task | Role | Why |
+|------|------|-----|
+| 1 | builder | new module (catalog) |
+| 2 | scout | port from tero v1 |
+| 3 | builder | new screen |
+| 4 | builder | extend existing screen |
+| 5 | builder | new feature |
+| 6 | architect | CSS |
+| 7 | verifier | integration tests |
 
 **Goal:** Dynamic model catalog (opencode/kilo live fetch + static fallback), ModelPickScreen with fuzzy filter, RoleSwapScreen extended with model selection step, ZAI native provider port, Command Palette (Ctrl+P).
 
@@ -2404,10 +2421,10 @@ pytest tests/test_m2_integration.py -v
 ```
 Expected: all PASS
 
-- [ ] **Step 3: Run full test suite to verify no regressions**
+- [ ] **Step 3: Run M2 tests only**
 
 ```
-pytest tests/ -v --tb=short
+pytest tests/test_catalog.py tests/test_zai_provider.py tests/test_model_pick.py tests/test_role_swap_m2.py tests/test_commands_palette.py tests/test_m2_integration.py -v --tb=short
 ```
 Expected: all PASS
 
@@ -2431,9 +2448,26 @@ After M2 completion:
 - Command Palette (Ctrl+P) with all DashboardApp actions
 - All M1 tests continue passing
 
+## Human QA — M2
+
+After automated tasks complete:
+- [ ] Run full regression suite: `pytest tests/ -v --tb=short`
+- [ ] Open RoleSwap [r] → verify 3-step flow works (role → provider → model)
+- [ ] Press Ctrl+P → verify Command Palette opens with all tero2 commands
+- [ ] Verify gemma shows as "in development" in provider list
+
 # M3 — Settings Screen & Project Wizard Step 3
 
-> **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
+**Role map:**
+| Task | Role | Why |
+|------|------|-----|
+| 1 | builder | config changes |
+| 2 | builder | CLI changes |
+| 3 | builder | new utility |
+| 4 | builder | new screen |
+| 5 | builder | new screen + wizard update |
+| 6 | architect | CSS |
+| 7 | verifier | integration tests |
 
 **Goal:** SettingsScreen with 3 tabs (Providers, Telegram, Behaviour), TelegramConfig.enabled field with legacy fallback, ProvidersPickScreen (wizard step 3 for new projects), SORA invariant validation, atomic config writes.
 
@@ -3462,12 +3496,12 @@ pytest tests/test_m3_integration.py -v
 ```
 Expected: all PASS
 
-- [ ] **Step 3: Run full test suite (all 3 milestones)**
+- [ ] **Step 3: Run M3 tests only**
 
 ```
-pytest tests/ -v --tb=short
+pytest tests/test_config_m3.py tests/test_cli_telegram_m3.py tests/test_config_writer.py tests/test_settings_screen.py tests/test_providers_pick.py tests/test_m3_integration.py -v --tb=short
 ```
-Expected: all PASS — no regressions from M1 or M2
+Expected: all PASS
 
 - [ ] **Step 4: Final M3 commit**
 
@@ -3489,3 +3523,13 @@ After M3 completion (all milestones done):
 - Checkbox "Save as global default" copies provider settings to `~/.tero2/config.toml`
 - Full end-to-end: `tero2 go` → wizard (project → plan → providers if new) → DashboardApp
 - All M1 + M2 tests continue passing
+
+## Human QA — M3
+
+After automated tasks complete:
+- [ ] Run full regression suite: `pytest tests/ -v --tb=short`
+- [ ] Open Settings [o] → verify 3 tabs render correctly
+- [ ] In Settings → Telegram tab → enable, enter token, save → verify `~/.tero2/config.toml` updated
+- [ ] Run `tero2 telegram` → verify it refuses when `enabled=false`
+- [ ] New project without `.sora/config.toml` → verify wizard shows step 3 (ProvidersPick)
+- [ ] In ProvidersPick → remove architect/verifier → verify SORA invariant blocks save

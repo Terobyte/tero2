@@ -15,9 +15,9 @@ from tero2.runner import Runner
 from tero2.state import SoraPhase
 from tero2.tui.screens.role_swap import RoleSwapScreen, SwitchProviderMessage
 from tero2.tui.screens.steer import SteerMessage, SteerScreen
+from tero2.tui.widgets.stuck_hint import StuckHintWidget
 from tero2.tui.widgets.log_view import LogView
 from tero2.tui.widgets.pipeline import PipelinePanel
-from tero2.tui.widgets.stuck_hint import StuckHintWidget
 from tero2.tui.widgets.usage import UsagePanel
 
 
@@ -28,18 +28,16 @@ class DashboardApp(App):
 
     BINDINGS: ClassVar[list] = [
         ("r", "roles", "Роли"),
-        ("s", "steer", "Указание"),
+        ("s", "steer", "Стир"),
         ("p", "pause", "Пауза"),
         ("q", "quit", "Выход"),
         ("k", "skip", "Пропустить"),
-        ("l", "change_plan", "Смена плана"),
-        ("n", "new_project", "Новый"),
-        ("o", "settings", "Настройки"),
-        ("1", "stuck_option_1", "1 retry"),
-        ("2", "stuck_option_2", "2 switch"),
-        ("3", "stuck_option_3", "3 skip"),
-        ("4", "stuck_option_4", "4 escalate"),
-        ("5", "stuck_option_5", "5 manual"),
+        ("l", "change_plan", "Изменить план"),
+        ("1", "stuck_option_1", ""),
+        ("2", "stuck_option_2", ""),
+        ("3", "stuck_option_3", ""),
+        ("4", "stuck_option_4", ""),
+        ("5", "stuck_option_5", ""),
     ]
 
     def __init__(
@@ -63,7 +61,9 @@ class DashboardApp(App):
         with Horizontal(id="main-row"):
             yield LogView(id="log-view")
             yield UsagePanel(id="usage-panel")
-        yield StuckHintWidget(id="stuck-hint")
+        hint = StuckHintWidget(id="stuck-hint")
+        hint.display = False
+        yield hint
         yield Footer()
 
     # ── lifecycle ────────────────────────────────────────────────────────────
@@ -179,6 +179,14 @@ class DashboardApp(App):
         log_view = self.query_one("#log-view", LogView)
         log_view.push_message("Настройки — будут в M3.", style="yellow")
 
+    # ── action guard ──────────────────────────────────────────────────────────
+
+    def _clear_stuck_mode(self) -> None:
+        pipeline = self.query_one("#pipeline", PipelinePanel)
+        stuck_hint = self.query_one("#stuck-hint", StuckHintWidget)
+        pipeline.stuck_mode = False
+        stuck_hint.display = False
+
     def check_action(self, action: str, parameters: tuple) -> bool:
         stuck_actions = {
             "stuck_option_1", "stuck_option_2", "stuck_option_3",
@@ -191,12 +199,6 @@ class DashboardApp(App):
             except Exception:
                 return False
         return True
-
-    def _clear_stuck_mode(self) -> None:
-        pipeline = self.query_one("#pipeline", PipelinePanel)
-        stuck_hint = self.query_one("#stuck-hint", StuckHintWidget)
-        pipeline.stuck_mode = False
-        stuck_hint.display = False
 
     def action_stuck_option_1(self) -> None:
         self._command_queue.put_nowait(
