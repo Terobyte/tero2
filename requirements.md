@@ -645,7 +645,7 @@ python -c "from tero2.tui.app import DashboardApp; print('OK')"
 ```
 Expected: `OK`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tero2/tui/styles.tcss
@@ -659,12 +659,12 @@ git commit -m "add styles for StuckHintWidget and wizard screens"
 ### Task 6: PlanPickScreen
 
 **Files:**
-- [ ] Create: `tero2/tui/screens/plan_pick.py`
-- [ ] Create: `tests/test_plan_pick.py`
+- [x] Create: `tero2/tui/screens/plan_pick.py`
+- [x] Create: `tests/test_plan_pick.py`
 
 Note: PlanPickScreen is needed BEFORE ProjectPickScreen because `action_change_plan` in app.py already references it.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_plan_pick.py
@@ -752,18 +752,18 @@ async def test_plan_pick_empty_dir_auto_idle(tmp_path):
         assert results == [None]
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 ```
 pytest tests/test_plan_pick.py -v
 ```
 Expected: `ImportError: cannot import name 'PlanPickScreen'`
 
-- [ ] **Step 3: Implement PlanPickScreen**
+- [x] **Step 3: Implement PlanPickScreen**
 
 **⚠️ Design notes:**
-- [ ] Scan filesystem ONCE in `__init__` and cache as `self._files: list[Path]`. Don't re-`rglob()` on every compose/select — slow + index drift if files change mid-use.
-- [ ] Use public `event.list_view.index` attribute — `_index` is a private Textual internal and can break between versions.
+- [x] Scan filesystem ONCE in `__init__` and cache as `self._files: list[Path]`. Don't re-`rglob()` on every compose/select — slow + index drift if files change mid-use.
+- [x] Use public `event.list_view.index` attribute — `_index` is a private Textual internal and can break between versions.
 
 ```python
 # tero2/tui/screens/plan_pick.py
@@ -849,7 +849,7 @@ class PlanPickScreen(ModalScreen[Path | None]):
         self.dismiss(None)
 ```
 
-- [ ] **Step 4: Run tests to verify pass**
+- [x] **Step 4: Run tests to verify pass**
 
 ```
 pytest tests/test_plan_pick.py -v

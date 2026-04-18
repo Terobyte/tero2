@@ -1,90 +1,95 @@
-"""PlanPickScreen — modal for selecting a plan file from the project directory."""
+"""PlanPickScreen — wizard step 2: pick a plan file."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import ClassVar
 
-from textual.screen import Screen
-from textual.widgets import Label, ListItem, ListView
+from textual.app import ComposeResult
+from textual.binding import Binding
+from textual.screen import ModalScreen
+from textual.widgets import Footer, Label, ListItem, ListView, Static
+
+from tero2.constants import PROJECT_SCAN_SKIP_DIRS
+
+_SKIP = PROJECT_SCAN_SKIP_DIRS | {".sora"}
+_MAX_PLANS = 30
 
 
-class PlanPickScreen(Screen):
-    """Full-screen modal listing .md files in *project_path* for plan selection.
+class PlanPickScreen(ModalScreen[Path | None]):
+    """Pick a plan .md file from the project directory.
 
     Dismisses with the selected :class:`~pathlib.Path` on confirmation,
-    or ``None`` if the user cancels.
-    """
-
-    DEFAULT_CSS: ClassVar[str] = """
-    PlanPickScreen {
-        align: center middle;
-    }
-    PlanPickScreen #pp-container {
-        width: 70;
-        height: auto;
-        max-height: 80vh;
-        border: solid $accent;
-        background: $surface;
-        padding: 1 2;
-    }
-    PlanPickScreen #pp-title {
-        text-style: bold;
-        color: $text;
-        margin-bottom: 1;
-    }
-    PlanPickScreen #pp-hint {
-        color: $text-muted;
-        margin-top: 1;
-    }
+    or ``None`` if the user cancels or there are no .md files.
     """
 
     BINDINGS: ClassVar[list] = [
-        ("escape", "cancel", "Отмена"),
-        ("q", "cancel", "Отмена"),
+        Binding("i", "idle_mode", "Idle (без плана)"),
+        Binding("b", "back", "Назад"),
+        Binding("escape,q", "back", "Назад", show=False),
     ]
 
-    def __init__(self, project_path: str | Path) -> None:
+    def __init__(self, project_path: Path) -> None:
         super().__init__()
-        self._project_path = Path(project_path)
-        self._plan_files: list[Path] = sorted(
-            p for p in self._project_path.rglob("*.md") if p.is_file()
-        )
+        self._project_path = project_path
+        # Scan once; cache result. Index used in selection must match compose().
+        self._files: list[Path] = self._scan_md_files()
+
+    def _scan_md_files(self) -> list[Path]:
+        files: list[Path] = []
+        try:
+            for p in self._project_path.rglob("*.md"):
+                if any(part in _SKIP for part in p.parts):
+                    continue
+                files.append(p)
+        except PermissionError:
+            pass
+        files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        return files[:_MAX_PLANS]
 
     # ── compose ──────────────────────────────────────────────────────────────
 
-    def compose(self):  # type: ignore[override]
-        from textual.containers import Vertical
-
-        items = (
-            [
-                ListItem(
-                    Label(str(p.relative_to(self._project_path))),
-                    name=str(p),
-                )
-                for p in self._plan_files
-            ]
-            if self._plan_files
-            else [ListItem(Label("Нет .md файлов в проекте"), name="")]
+    def compose(self) -> ComposeResult:
+        yield Static(
+            f"tero2 — план для {self._project_path.name}",
+            classes="screen-title",
         )
+        if not self._files:
+            yield Static("Нет .md файлов — запуск в idle-режиме…", classes="info-msg")
+        else:
+            items = [
+                ListItem(
+                    Label(p.name, classes="plan-name"),
+                    Label(str(p.parent), classes="path-label"),
+                )
+                for p in self._files
+            ]
+            yield ListView(*items, id="plan-list")
+        yield Footer()
 
-        with Vertical(id="pp-container"):
-            yield Label("Выберите файл плана:", id="pp-title")
-            yield ListView(*items, id="pp-list")
-            yield Label("Enter — выбрать  |  Esc / q — отмена", id="pp-hint")
+    # ── lifecycle ─────────────────────────────────────────────────────────────
+
+    def on_mount(self) -> None:
+        if not self._files:
+            self.call_after_refresh(self._auto_idle)
+
+    def _auto_idle(self) -> None:
+        self.dismiss(None)
 
     # ── event handlers ───────────────────────────────────────────────────────
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         event.stop()
-        name = event.item.name
-        if name:
-            self.dismiss(Path(name))
-        else:
-            self.dismiss(None)
+        idx = event.list_view.index  # public attr — avoids private _index
+        if idx is not None and 0 <= idx < len(self._files):
+            self.dismiss(self._files[idx])
 
     # ── actions ──────────────────────────────────────────────────────────────
 
-    def action_cancel(self) -> None:
+    def action_idle_mode(self) -> None:
+        """Dismiss without a plan (idle / no-plan mode)."""
+        self.dismiss(None)
+
+    def action_back(self) -> None:
         """Close the screen without selecting a plan."""
         self.dismiss(None)
