@@ -586,7 +586,7 @@ pytest tests/test_app_migration.py tests/test_tui_commands.py tests/test_stuck_h
 ```
 Expected: all PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tero2/tui/app.py tero2/tui/widgets/stuck_hint.py tests/test_app_migration.py tests/test_tui_commands.py
@@ -599,13 +599,13 @@ git commit -m "replace ControlsPanel with StuckHintWidget, add Header/Footer"
 ### Task 5: styles.tcss — add styles for new widgets
 
 **Files:**
-- [ ] Modify: `tero2/tui/styles.tcss`
+- [x] Modify: `tero2/tui/styles.tcss`
 
-- [ ] **Step 1: Read current styles.tcss to understand structure**
+- [x] **Step 1: Read current styles.tcss to understand structure**
 
 Check `tero2/tui/styles.tcss` first to see existing selectors and layout.
 
-- [ ] **Step 2: Add styles for new screens**
+- [x] **Step 2: Add styles for new screens**
 
 **⚠️ Don't duplicate:** `StuckHintWidget` already declares `DEFAULT_CSS` in its class body (Task 3). Do NOT re-declare the same rules in `styles.tcss` — Textual would merge both and drift over time. Only styles that don't belong to a single widget go here.
 
@@ -638,7 +638,7 @@ ProjectPickScreen .entry-warning {
 }
 ```
 
-- [ ] **Step 3: Verify app still launches without CSS errors**
+- [x] **Step 3: Verify app still launches without CSS errors**
 
 ```
 python -c "from tero2.tui.app import DashboardApp; print('OK')"
