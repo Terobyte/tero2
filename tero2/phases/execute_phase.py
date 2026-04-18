@@ -36,6 +36,7 @@ Crash recovery:
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 
 from tero2.disk_layer import DiskLayer
@@ -113,6 +114,12 @@ async def run_execute(
     max_cycles = ctx.config.reflexion.max_cycles
 
     tasks = slice_plan.tasks
+    if not tasks:
+        return PhaseResult(
+            success=False,
+            error=f"slice {slice_plan.slice_id} has no tasks",
+            data={"slice_id": slice_plan.slice_id, "completed": {}},
+        )
     # Restore crash-recovery offset from persisted state.
     start_index = ctx.state.current_task_index
     # Capture whether the task at start_index was genuinely in-progress when the
@@ -133,7 +140,8 @@ async def run_execute(
                 start_index,
             )
             summary_path = f"{slice_plan.slice_dir}/{task.id}-SUMMARY.md"
-            completed[task.id] = summary_path
+            if (ctx.disk.sora_dir / summary_path).exists():
+                completed[task.id] = summary_path
             continue
 
         # ── Task-boundary safety checks ───────────────────────────────────
@@ -421,8 +429,7 @@ def _check_override(
     override = ctx.disk.read_override()
     if not override:
         return None
-    upper = override.upper()
-    if "STOP" in upper:
+    if _RE_STOP.search(override):
         log.info("execute: STOP override received")
         ctx.disk.clear_override()
         return PhaseResult(
@@ -430,7 +437,7 @@ def _check_override(
             error="STOP requested via OVERRIDE.md",
             data={"slice_id": slice_id, "completed": completed},
         )
-    if "PAUSE" in upper:
+    if _RE_PAUSE.search(override):
         log.info("execute: PAUSE override received")
         ctx.state = ctx.checkpoint.mark_paused(ctx.state, "paused via OVERRIDE.md")
         ctx.disk.clear_override()
@@ -440,6 +447,10 @@ def _check_override(
             data={"slice_id": slice_id, "completed": completed},
         )
     return None
+
+
+_RE_STOP = re.compile(r"^\s*STOP\s*$", re.MULTILINE | re.IGNORECASE)
+_RE_PAUSE = re.compile(r"^\s*PAUSE\s*$", re.MULTILINE | re.IGNORECASE)
 
 
 def _update_task_metrics(disk: DiskLayer, task_id: str, passed: bool) -> None:

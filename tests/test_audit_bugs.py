@@ -110,15 +110,13 @@ class TestBug35EscalationNoReset:
         action3 = decide_escalation(not_stuck, EscalationLevel.BACKTRACK_COACH, 0, cfg)
         assert action3.level == EscalationLevel.NONE  # this passes
 
-        # BUG: in runner.py, ctx.escalation_level stays at BACKTRACK_COACH
-        # The runner does NOT reset it to NONE when action.level == NONE.
-        # So next stuck with level=BACKTRACK_COACH → immediate HUMAN.
-        # Simulate what actually happens in runner:
-        ctx_escalation_level = EscalationLevel.BACKTRACK_COACH  # never reset
+        # FIX: runner.py now resets ctx.escalation_level to NONE when
+        # action.level == NONE (agent recovered). See runner.py else branch.
+        # Simulate the fixed runner state after recovery:
+        ctx_escalation_level = EscalationLevel.NONE  # correctly reset
 
-        # Next stuck signal — should be Level 1 again, but becomes HUMAN
+        # Next stuck signal — starts from Level 1 again (DIVERSIFICATION)
         action4 = decide_escalation(stuck, ctx_escalation_level, 0, cfg)
-        # This assertion FAILS: action4.level is HUMAN, not DIVERSIFICATION
         assert action4.level == EscalationLevel.DIVERSIFICATION, (
             f"Expected DIVERSIFICATION after recovery, got {action4.level.name}"
         )

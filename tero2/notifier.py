@@ -89,14 +89,14 @@ class Notifier:
     @staticmethod
     def _generate_tts(text: str) -> Path | None:
         try:
-            import sys
+            import importlib.util
 
-            target = str(TTS_SCRIPT.parent.parent)
-            if target not in sys.path:
-                sys.path.insert(0, target)
-            from library.tts_fish_audio import tts_fish_audio_simple
-
-            result = tts_fish_audio_simple(text)
+            spec = importlib.util.spec_from_file_location(
+                "tts_fish_audio", TTS_SCRIPT
+            )
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            result = mod.tts_fish_audio_simple(text)
             return Path(result)
         except Exception:
             log.warning("TTS generation failed", exc_info=True)

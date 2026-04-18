@@ -45,6 +45,10 @@ def cmd_run(args: argparse.Namespace) -> None:
     else:
         plan_file = plan_file.resolve()
 
+    if not plan_file.is_relative_to(project_path):
+        print(f"error: plan file must be inside project directory: {plan_file}")
+        sys.exit(1)
+
     if not plan_file.is_file():
         print(f"error: plan file not found: {plan_file}")
         sys.exit(1)
@@ -121,6 +125,9 @@ def cmd_go(args: argparse.Namespace) -> None:
             pf = (project_path / pf).resolve()
         else:
             pf = pf.resolve()
+        if not pf.is_relative_to(project_path):
+            print(f"error: plan file must be inside project directory: {pf}")
+            sys.exit(1)
         if not pf.is_file():
             print(f"error: plan file not found: {pf}")
             sys.exit(1)
@@ -184,6 +191,10 @@ def cmd_harden(args: argparse.Namespace) -> None:
         plan_file = (project_path / plan_file).resolve()
     else:
         plan_file = plan_file.resolve()
+
+    if not plan_file.is_relative_to(project_path):
+        print(f"error: plan file must be inside project directory: {plan_file}")
+        sys.exit(1)
 
     if not plan_file.is_file():
         print(f"error: plan file not found: {plan_file}")

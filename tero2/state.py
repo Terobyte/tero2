@@ -30,6 +30,18 @@ class SoraPhase(str, Enum):
     SLICE_DONE = "slice_done"
 
 
+# Canonical phase execution order (excludes NONE which is a null-state).
+# Import this instead of redeclaring the order in other modules.
+SORA_PHASE_ORDER: list[SoraPhase] = [
+    SoraPhase.HARDENING,
+    SoraPhase.SCOUT,
+    SoraPhase.COACH,
+    SoraPhase.ARCHITECT,
+    SoraPhase.EXECUTE,
+    SoraPhase.SLICE_DONE,
+]
+
+
 # Valid next-states for Phase transitions.
 # COMPLETED is terminal; no exits allowed.
 _PHASE_VALID_NEXT: dict[Phase, frozenset[Phase]] = {
@@ -99,23 +111,39 @@ class AgentState:
     def from_json(cls, data: str) -> AgentState:
         try:
             d = json.loads(data)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            return cls()
 
-            # Fuzzy-correct typo'd field names before enum conversion.
-            # Example: "soraphase" → "sora_phase" (underscore stripped comparison).
-            known = set(cls.__dataclass_fields__)
-            unknown = [k for k in d if k not in known]
-            if unknown:
-                _norm = {f.replace("_", ""): f for f in known}
-                for uk in unknown:
-                    canonical = _norm.get(uk.replace("_", ""))
-                    # Only apply correction when the canonical key isn't already present.
-                    if canonical is not None and canonical not in d:
-                        d[canonical] = d.pop(uk)
+        if not isinstance(d, dict):
+            return cls()
 
+        # Fuzzy-correct typo'd field names before enum conversion.
+        # Example: "soraphase" → "sora_phase" (underscore stripped comparison).
+        known = set(cls.__dataclass_fields__)
+        unknown = [k for k in d if k not in known]
+        if unknown:
+            _norm = {f.replace("_", ""): f for f in known}
+            for uk in unknown:
+                canonical = _norm.get(uk.replace("_", ""))
+                # Only apply correction when the canonical key isn't already present.
+                if canonical is not None and canonical not in d:
+                    d[canonical] = d.pop(uk)
+
+        # Per-field enum coercion: a bad value in one field must not discard
+        # all other valid fields by triggering a blanket except → cls().
+        try:
             d["phase"] = Phase(d.get("phase", "idle"))
+        except ValueError:
+            d["phase"] = Phase.IDLE
+
+        try:
             d["sora_phase"] = SoraPhase(d.get("sora_phase", "none"))
+        except ValueError:
+            d["sora_phase"] = SoraPhase.NONE
+
+        try:
             return cls(**{k: v for k, v in d.items() if k in known})
-        except (json.JSONDecodeError, ValueError, TypeError, KeyError, AttributeError):
+        except (TypeError, KeyError, AttributeError):
             return cls()
 
     @classmethod

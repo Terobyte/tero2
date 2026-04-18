@@ -15,10 +15,10 @@
 ### Task 1: Move _SKIP_DIRS to constants.py
 
 **Files:**
-- [x] Modify: `tero2/constants.py`
-- [x] Modify: `tero2/players/scout.py`
+- Modify: `tero2/constants.py`
+- Modify: `tero2/players/scout.py`
 
-- [x] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing test**
 
 ```python
 # tests/test_constants.py
@@ -32,14 +32,14 @@ def test_skip_dirs_contains_expected():
         assert d in PROJECT_SCAN_SKIP_DIRS
 ```
 
-- [x] **Step 2: Run to verify failure**
+- [ ] **Step 2: Run to verify failure**
 
 ```
 pytest tests/test_constants.py -v
 ```
 Expected: `ImportError: cannot import name 'PROJECT_SCAN_SKIP_DIRS'`
 
-- [x] **Step 3: Add PROJECT_SCAN_SKIP_DIRS to constants.py**
+- [ ] **Step 3: Add PROJECT_SCAN_SKIP_DIRS to constants.py**
 
 Append to the end of `tero2/constants.py`:
 ```python
@@ -55,7 +55,7 @@ PROJECT_SCAN_SKIP_DIRS: frozenset[str] = frozenset({
 })
 ```
 
-- [x] **Step 4: Update scout.py to import from constants**
+- [ ] **Step 4: Update scout.py to import from constants**
 
 In `tero2/players/scout.py`, find `_SKIP_DIRS` (lines ~177-188) and replace the local definition with:
 ```python
@@ -63,7 +63,7 @@ from tero2.constants import PROJECT_SCAN_SKIP_DIRS as _SKIP_DIRS
 ```
 Remove the old `_SKIP_DIRS = {...}` block entirely.
 
-- [x] **Step 5: Run tests to verify pass**
+- [ ] **Step 5: Run tests to verify pass**
 
 ```
 pytest tests/test_constants.py tests/test_players.py -v
@@ -82,8 +82,8 @@ git commit -m "move _SKIP_DIRS to constants.PROJECT_SCAN_SKIP_DIRS"
 ### Task 2: tero2/history.py — project run history
 
 **Files:**
-- [ ] Create: `tero2/history.py`
-- [ ] Create: `tests/test_history.py`
+- Create: `tero2/history.py`
+- Create: `tests/test_history.py`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -245,8 +245,8 @@ git commit -m "add history.py with HistoryEntry load/record/trim"
 ### Task 3: StuckHintWidget
 
 **Files:**
-- [ ] Create: `tero2/tui/widgets/stuck_hint.py`
-- [ ] Create: `tests/test_stuck_hint.py`
+- Create: `tero2/tui/widgets/stuck_hint.py`
+- Create: `tests/test_stuck_hint.py`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -355,10 +355,10 @@ git commit -m "add StuckHintWidget for stuck-state visibility"
 ### Task 4: Migrate app.py — ControlsPanel → StuckHintWidget
 
 **Files:**
-- [ ] Modify: `tero2/tui/app.py` (all ControlsPanel references)
-- [ ] Delete: `tero2/tui/widgets/controls.py`
-- [ ] Modify: `tero2/tui/styles.tcss`
-- [ ] Modify: `tests/test_tui_commands.py` (update references)
+- Modify: `tero2/tui/app.py` (all ControlsPanel references)
+- Delete: `tero2/tui/widgets/controls.py`
+- Modify: `tero2/tui/styles.tcss`
+- Modify: `tests/test_tui_commands.py` (update references)
 
 **Exact changes needed in app.py:**
 
@@ -378,8 +378,8 @@ git commit -m "add StuckHintWidget for stuck-state visibility"
 - [ ] **Step 1: Write the failing tests**
 
 **⚠️ Gotchas baked into these tests:**
-- [ ] `make_event` signature is `role: str = ""` — passing `role=None` raises TypeError. Use `role=""`.
-- [ ] `on_mount` subscribes once and stores the returned queue in `self._event_queue`. The background worker captures that reference when it starts. Overwriting `app._event_queue = asyncio.Queue()` from the test has no effect — the worker keeps the old reference. Instead: push to the SAME queue the app has (they're the same object as `dispatcher.subscribe.return_value`).
+- `make_event` signature is `role: str = ""` — passing `role=None` raises TypeError. Use `role=""`.
+- `on_mount` subscribes once and stores the returned queue in `self._event_queue`. The background worker captures that reference when it starts. Overwriting `app._event_queue = asyncio.Queue()` from the test has no effect — the worker keeps the old reference. Instead: push to the SAME queue the app has (they're the same object as `dispatcher.subscribe.return_value`).
 
 ```python
 # tests/test_app_migration.py
@@ -457,14 +457,14 @@ Expected: `FAIL test_no_controls_panel_in_dom` (ControlsPanel still exists)
 
 Edit `tero2/tui/app.py`:
 
-- [ ] Replace line 17 (ControlsPanel import):
+1. Replace line 17 (ControlsPanel import):
 ```python
 from textual.widgets import Footer, Header
 
 from tero2.tui.widgets.stuck_hint import StuckHintWidget
 ```
 
-- [ ] Replace BINDINGS (lines 28-39):
+2. Replace BINDINGS (lines 28-39):
 ```python
 BINDINGS: ClassVar[list] = [
     ("r", "roles", "Роли"),
@@ -483,7 +483,7 @@ BINDINGS: ClassVar[list] = [
 ]
 ```
 
-- [ ] Replace compose() method:
+3. Replace compose() method:
 ```python
 def compose(self) -> ComposeResult:
     yield Header()
@@ -495,7 +495,7 @@ def compose(self) -> ComposeResult:
     yield Footer()
 ```
 
-- [ ] In `_consume_events()`, replace line 88:
+4. In `_consume_events()`, replace line 88:
 ```python
 stuck_hint = self.query_one("#stuck-hint", StuckHintWidget)
 ```
@@ -508,7 +508,7 @@ stuck_hint.display = True
 stuck_hint.display = False
 ```
 
-- [ ] Replace `_clear_stuck_mode()`:
+5. Replace `_clear_stuck_mode()`:
 ```python
 def _clear_stuck_mode(self) -> None:
     pipeline = self.query_one("#pipeline", PipelinePanel)
@@ -517,7 +517,7 @@ def _clear_stuck_mode(self) -> None:
     stuck_hint.display = False
 ```
 
-- [ ] Add `check_action()` method after `_clear_stuck_mode`:
+6. Add `check_action()` method after `_clear_stuck_mode`:
 ```python
 def check_action(self, action: str, parameters: tuple) -> bool:
     stuck_actions = {
@@ -533,7 +533,7 @@ def check_action(self, action: str, parameters: tuple) -> bool:
     return True
 ```
 
-- [ ] Add new action stubs after `action_skip`:
+7. Add new action stubs after `action_skip`:
 
 **⚠️ Guard against missing project_path:** `runner.project_path` can be `None` when the Runner was started via idle mode without a project (rare but possible). `PlanPickScreen.__init__` calls `.rglob("*.md")` on the path — passing `None` crashes with `AttributeError`. Guard before pushing the screen.
 
@@ -599,7 +599,7 @@ git commit -m "replace ControlsPanel with StuckHintWidget, add Header/Footer"
 ### Task 5: styles.tcss — add styles for new widgets
 
 **Files:**
-- [ ] Modify: `tero2/tui/styles.tcss`
+- Modify: `tero2/tui/styles.tcss`
 
 - [ ] **Step 1: Read current styles.tcss to understand structure**
 
@@ -659,8 +659,8 @@ git commit -m "add styles for StuckHintWidget and wizard screens"
 ### Task 6: PlanPickScreen
 
 **Files:**
-- [ ] Create: `tero2/tui/screens/plan_pick.py`
-- [ ] Create: `tests/test_plan_pick.py`
+- Create: `tero2/tui/screens/plan_pick.py`
+- Create: `tests/test_plan_pick.py`
 
 Note: PlanPickScreen is needed BEFORE ProjectPickScreen because `action_change_plan` in app.py already references it.
 
@@ -762,8 +762,8 @@ Expected: `ImportError: cannot import name 'PlanPickScreen'`
 - [ ] **Step 3: Implement PlanPickScreen**
 
 **⚠️ Design notes:**
-- [ ] Scan filesystem ONCE in `__init__` and cache as `self._files: list[Path]`. Don't re-`rglob()` on every compose/select — slow + index drift if files change mid-use.
-- [ ] Use public `event.list_view.index` attribute — `_index` is a private Textual internal and can break between versions.
+- Scan filesystem ONCE in `__init__` and cache as `self._files: list[Path]`. Don't re-`rglob()` on every compose/select — slow + index drift if files change mid-use.
+- Use public `event.list_view.index` attribute — `_index` is a private Textual internal and can break between versions.
 
 ```python
 # tero2/tui/screens/plan_pick.py
@@ -868,9 +868,9 @@ git commit -m "add PlanPickScreen for wizard step 2"
 ### Task 7: ProjectPickScreen + StartupWizard
 
 **Files:**
-- [ ] Create: `tero2/tui/screens/project_pick.py`
-- [ ] Create: `tero2/tui/screens/startup_wizard.py`
-- [ ] Create: `tests/test_startup_wizard.py`
+- Create: `tero2/tui/screens/project_pick.py`
+- Create: `tero2/tui/screens/startup_wizard.py`
+- Create: `tests/test_startup_wizard.py`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1103,8 +1103,8 @@ git commit -m "add ProjectPickScreen and StartupWizard"
 ### Task 8: cli.py — optional project_path + wizard launch
 
 **Files:**
-- [ ] Modify: `tero2/cli.py`
-- [ ] Create: `tests/test_cli_wizard.py`
+- Modify: `tero2/cli.py`
+- Create: `tests/test_cli_wizard.py`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1233,8 +1233,8 @@ git commit -m "make project_path optional in go subcommand, wire startup wizard"
 ### Task 9: record_run call in cmd_go
 
 **Files:**
-- [ ] Modify: `tero2/cli.py`
-- [ ] Modify: `tests/test_cli_wizard.py`
+- Modify: `tero2/cli.py`
+- Modify: `tests/test_cli_wizard.py`
 
 - [ ] **Step 1: Add test for history recording**
 
@@ -1302,7 +1302,7 @@ git commit -m "record project run in history after DashboardApp launch"
 ### Task 10: Integration smoke test + full suite
 
 **Files:**
-- [ ] Create: `tests/test_m1_integration.py`
+- Create: `tests/test_m1_integration.py`
 
 - [ ] **Step 1: Write integration test**
 
@@ -1394,12 +1394,12 @@ git commit -m "m1 integration tests: wizard path, no controls panel, no regressi
 ## Summary
 
 After M1 completion:
-- [ ] `tero2 go` without args opens wizard → DashboardApp (no crash)
-- [ ] `tero2 go <path>` works as before (regression-free)
-- [ ] ControlsPanel deleted, StuckHintWidget shows during stuck state
-- [ ] Footer replaces ControlsPanel hotkey display
-- [ ] Stuck options `[1-5]` hidden from Footer until stuck state, with readable labels
-- [ ] `[s]` labeled "Указание" (was "Стир")
-- [ ] Project run history in `~/.tero2/history.json`
-- [ ] `[l]` changes plan (sends `new_plan` command — works in idle, warns in active)
-- [ ] `[n]` and `[o]` are stubs (M2/M3)
+- `tero2 go` without args opens wizard → DashboardApp (no crash)
+- `tero2 go <path>` works as before (regression-free)
+- ControlsPanel deleted, StuckHintWidget shows during stuck state
+- Footer replaces ControlsPanel hotkey display
+- Stuck options `[1-5]` hidden from Footer until stuck state, with readable labels
+- `[s]` labeled "Указание" (was "Стир")
+- Project run history in `~/.tero2/history.json`
+- `[l]` changes plan (sends `new_plan` command — works in idle, warns in active)
+- `[n]` and `[o]` are stubs (M2/M3)

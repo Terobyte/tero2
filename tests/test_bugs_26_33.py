@@ -49,6 +49,15 @@ class TestBug26CrashRecoveryCompletedMap:
         tasks = [Task(id=f"T{i:02d}", description=f"task {i}") for i in range(1, num_tasks + 1)]
         slice_plan = SlicePlan(slice_id="S01", slice_dir="milestones/M001/S01", tasks=tasks)
 
+        # Write summary files for tasks that will be skipped (crash recovery implies
+        # a previous run wrote them; Bug 66 fix now requires them to exist on disk).
+        for i in range(1, start_index + 1):
+            task_id = f"T{i:02d}"
+            disk.write_file(
+                f"milestones/M001/S01/{task_id}-SUMMARY.md",
+                f"summary for {task_id}",
+            )
+
         with patch("tero2.phases.execute_phase.BuilderPlayer") as MockB:
             inst = MagicMock()
             inst.run = AsyncMock(

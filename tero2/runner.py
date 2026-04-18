@@ -35,7 +35,7 @@ from tero2.project_lock import ProjectLock
 from tero2.providers.chain import ProviderChain
 from tero2.providers.registry import create_provider
 from tero2.reflexion import MAX_BUILDER_OUTPUT_CHARS, ReflexionContext, add_attempt
-from tero2.state import AgentState, Phase, SoraPhase
+from tero2.state import SORA_PHASE_ORDER, AgentState, Phase, SoraPhase
 from tero2.stuck_detection import StuckSignal, check_stuck
 from tero2.triggers import CoachTrigger
 
@@ -44,14 +44,7 @@ log = logging.getLogger(__name__)
 _IDLE_POLL_S = 60.0
 
 
-_PHASE_ORDER = [
-    SoraPhase.HARDENING,
-    SoraPhase.SCOUT,
-    SoraPhase.COACH,
-    SoraPhase.ARCHITECT,
-    SoraPhase.EXECUTE,
-    SoraPhase.SLICE_DONE,
-]
+_PHASE_ORDER = SORA_PHASE_ORDER
 
 
 def _phase_already_done(current: SoraPhase, candidate: SoraPhase) -> bool:
@@ -411,8 +404,14 @@ class Runner:
         self._ctx = ctx
 
         if self.plan_file:
+            try:
+                plan_content = self.plan_file.read_text()
+            except FileNotFoundError as exc:
+                raise FileNotFoundError(
+                    f"plan file not found: {self.plan_file}"
+                ) from exc
             roadmap_path = f"{ctx.milestone_path}/ROADMAP.md"
-            ctx.disk.write_file(roadmap_path, self.plan_file.read_text())
+            ctx.disk.write_file(roadmap_path, plan_content)
 
         if "reviewer" in self.config.roles and not _phase_already_done(
             state.sora_phase, SoraPhase.HARDENING

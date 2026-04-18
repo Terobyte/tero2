@@ -38,3 +38,19 @@ EXIT_AGENT_TIMEOUT: int = 124
 EXIT_ALL_PROVIDERS_FAILED: int = 2
 EXIT_LOCK_HELD: int = 3
 EXIT_CONFIG_ERROR: int = 4
+
+# ── File-tree scanning ───────────────────────────────────────
+# Shared skip-set used by ScoutPlayer._build_file_tree and PlanPickScreen.
+# Add entries here once; both consumers pick them up automatically.
+PROJECT_SCAN_SKIP_DIRS: frozenset[str] = frozenset(
+    {
+        ".git",
+        ".venv",
+        "node_modules",
+        "__pycache__",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".mypy_cache",
+        "dist",
+    }
+)

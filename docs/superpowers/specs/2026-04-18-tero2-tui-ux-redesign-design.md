@@ -1,6 +1,6 @@
 # tero2 TUI UX Redesign — Design Spec
 
-**Статус:** design, approved by user, ready for implementation planning
+**Статус:** design, revised 2026-04-18 (post-review: registry.py existing, `new_plan` reuse, stuck-hints, OQ 1/4 closed), ready for implementation planning
 **Дата:** 2026-04-18
 **Worktree:** `.worktrees/phase4-tui`
 **Baseline branch:** `phase4-tui` (реализация [2026-04-15-mvp2.6-tui-dashboard-design.md](2026-04-15-mvp2.6-tui-dashboard-design.md))
@@ -67,7 +67,7 @@
    - **Через opencode:** модель `zai/glm-5.1` в списке opencode — уже работает из коробки.
    - Пользователь выбирает любой путь через ModelPickScreen. Оба видны одновременно.
 6. **Меню-навигация:** ↑↓ + Enter через `ListView.Selected`; Esc/q — отмена; Tab — между полями.
-7. **Model catalog:** **dynamic fetch** через `opencode models` и `kilo models --refresh`. Hardcoded только для `claude`/`codex`/`zai`/`gemma` (placeholder).
+7. **Model catalog:** **dynamic fetch** через `opencode models` и `kilo models --refresh`. Hardcoded только для `claude`/`codex`/`zai`; `gemma` — **in development**, отображается disabled до реализации отдельным spec'ом.
 8. **OpenRouter:** через `opencode` (ключ в `~/.config/opencode/opencode.json`). Native OpenRouter-провайдер — не в этот spec.
 9. **Telegram:** в настройках только вкл/выкл + минимум полей. Бот остаётся **однонаправленным input'ом** ([telegram_input.py](../../tero2/telegram_input.py) — это plan-launcher, не chat).
 10. **Переименования в UI:** «стир» → «указание», «scout» → «разведчик», «builder» → «строитель», «architect» → «архитектор», «verifier» → «проверяющий». Внутренние идентификаторы в коде (`Command("steer", ...)`, `role="scout"`) не меняем.
@@ -107,15 +107,28 @@ tero2 go [project_path?]
 - `tero2/history.py` — загрузка/запись `~/.tero2/history.json`.
 - `tero2/providers/catalog.py` — dynamic model catalog + static fallback.
 - `tero2/providers/zai.py` — порт из tero.
-- `tero2/providers/registry.py` — unified dispatcher (routes by name к `CLIProvider` либо `ZaiProvider`). **Новый файл** — на `phase4-tui` его нет.
+- `tero2/providers/registry.py` — **уже существует** ([providers/registry.py:11-15](../../tero2/providers/registry.py:11)) с `_REGISTRY: dict[str, type[BaseProvider]]` + `register(name, cls)` + `create_provider(name, ...)`. Правки: зарегистрировать `ZaiProvider` рядом с существующими `CLIProvider`-записями (вызов `register("zai", ZaiProvider)` при импорте `providers/__init__.py`). Ранее помеченный Open Question 4 закрыт этим фактом.
 
 ### Новые TUI модули
 
 - `tero2/tui/commands.py` — `CommandProvider` для Textual Command Palette (Ctrl+P).
+- `tero2/tui/widgets/stuck_hint.py` — однострочный widget над Footer с текстом stuck-вариантов (`1. retry  2. switch  3. skip  4. escalate  5. manual`). Visibility переключается по `stuck` event'у Runner'а. Заменяет часть функциональности удалённого `ControlsPanel`, относящуюся к stuck-режиму.
 
 ### Изменения в существующих
 
-- `tero2/cli.py` — `project_path` → `nargs="?"` в `go`-subparser.
+- `tero2/cli.py` — `project_path` → `nargs="?"` в `go`-subparser. **Обязательно** переписать [cmd_go:115](../../tero2/cli.py:115) с ветвлением:
+  ```python
+  if args.project_path is None:
+      # запуск wizard, возврат (project_path, plan_file) или None при отмене
+      result = run_startup_wizard()
+      if result is None:
+          sys.exit(0)
+      project_path, plan_file = result
+  else:
+      project_path = Path(args.project_path).expanduser().resolve()
+      plan_file = _resolve_plan(args.plan, project_path) if args.plan else None
+  ```
+  Без этого `Path(None)` кидает `TypeError` и M1 падает при `tero2 go` без аргументов.
 - `tero2/tui/app.py` — `+Header`, `+Footer`, `-ControlsPanel`, `+action_new_project`, `+action_change_plan`, `+action_settings`, `COMMANDS` для Command Palette.
 - `tero2/tui/screens/role_swap.py` — step 2 → step 2+3 (CLI → модель).
 - `tero2/config.py` — `TelegramConfig.enabled: bool` + legacy fallback.
@@ -238,15 +251,25 @@ tero2 go [project_path?]
 
 - Существующие (show=True в Footer): `r` роли, `s` указание, `p` пауза, `q` выход, `k` пропустить.
 - Новые: `l` план (смена на лету), `n` новый проект, `o` настройки.
-- Stuck-options (`1`–`5`) — `show=False` в BINDINGS, чтобы не шумели в Footer.
+- Stuck-options (`1`–`5`) — `show=True` в BINDINGS с **читаемыми labels** (сейчас пустые строки `""` в [app.py:34-38](../../tero2/tui/app.py:34)). Новые labels: `"1 retry"`, `"2 switch"`, `"3 skip"`, `"4 escalate"`, `"5 manual"`. Условное скрытие из Footer через `check_action()`: возвращает `False` пока Runner не в stuck-state, `True` при `stuck` event. Textual Footer автоматически перерисовывается и показывает `[1-5]` только во время stuck-режима с labels. В дополнение — новый однострочный `StuckHintWidget` над Footer, который становится видимым по тому же сигналу и выводит более развёрнутый текст (`застряли — выбери: 1 retry  2 switch  3 skip  4 escalate  5 manual`). Без этого пользователь не знает о наличии опций после удаления `ControlsPanel`.
+
+**Migration `ControlsPanel` → `StuckHintWidget` в [app.py](../../tero2/tui/app.py):**
+- [app.py:17](../../tero2/tui/app.py:17) import `ControlsPanel` → убрать; добавить `from tero2.tui.widgets.stuck_hint import StuckHintWidget`.
+- [app.py:61](../../tero2/tui/app.py:61) `yield ControlsPanel(id="controls")` → `yield StuckHintWidget(id="stuck-hint")` (ниже `main-row`, выше Footer).
+- [app.py:88](../../tero2/tui/app.py:88) `controls = self.query_one("#controls", ControlsPanel)` → `stuck_hint = self.query_one("#stuck-hint", StuckHintWidget)`.
+- [app.py:107](../../tero2/tui/app.py:107) `controls.stuck_mode = True` → `stuck_hint.visible = True` (widget сам переключает display).
+- [app.py:112](../../tero2/tui/app.py:112) `controls.stuck_mode = False` → `stuck_hint.visible = False`.
+- [app.py:148-150](../../tero2/tui/app.py:148) `_clear_stuck_mode`: заменить `controls = ...` / `controls.stuck_mode = False` на `stuck_hint = ...` / `stuck_hint.visible = False`. `pipeline.stuck_mode = False` остаётся.
+
+Без этого M1 ломается при runtime (`ControlsPanel` удалён, но `query_one("#controls", ControlsPanel)` в 3 местах кидает `NoMatches`).
 
 ### Новые actions
 
 - `action_new_project` — ставит текущий runner на паузу через `command_queue`, открывает `StartupWizard` через `push_screen` с callback.
-- `action_change_plan` — открывает `PlanPickScreen(self._runner.project_path)` с callback, который шлёт `Command("load_plan", ...)` в `command_queue`.
+- `action_change_plan` — открывает `PlanPickScreen(self._runner.project_path)` с callback, который шлёт `Command("new_plan", {"text": <path>})` в `command_queue`. **Переиспользуем существующий kind** — не вводим `load_plan`.
 - `action_settings` — `push_screen(SettingsScreen())`.
 
-**Runner-side handling `Command("load_plan")`:** сохранить checkpoint, загрузить новый план, применить к pipeline. Детали — в M2-плане при анализе [runner.py](../../tero2/runner.py).
+**Runner-side handling `Command("new_plan")`:** `new_plan` **уже обрабатывается** Runner'ом в idle-режиме ([runner.py:600-612](../../tero2/runner.py:600)): resolve пути → `checkpoint.mark_started` → `_execute_plan`. В M2 нужно **расширить** handler, чтобы он работал не только в `_idle_loop`, но и во время активного выполнения: pause текущий task → сохранить checkpoint → загрузить новый план → применить к pipeline. Для M1 idle-path работает из коробки; active-path — warning-стаб.
 
 ### Command Palette
 
@@ -359,17 +382,28 @@ class TelegramConfig:
 **Legacy fallback в `_parse_config`** ([config.py:168](../../tero2/config.py:168)):
 если `enabled` отсутствует в TOML, но `bot_token` непустой — считаем `enabled = True` (сохраняем поведение tero2 < redesign).
 
+**Правка `cmd_telegram`** ([cli.py:258](../../tero2/cli.py:258)): сейчас guard `if not config.telegram or not config.telegram.bot_token:`. Добавить проверку `enabled`:
+```python
+if not config.telegram or not config.telegram.enabled:
+    print("error: telegram disabled — enable в ~/.tero2/config.toml или SettingsScreen")
+    sys.exit(1)
+if not config.telegram.bot_token:
+    print("error: telegram bot_token not configured")
+    sys.exit(1)
+```
+Без этого пользователь может выставить `enabled = false` через SettingsScreen, но `tero2 telegram` всё равно запустится. Правка — часть M3 (одновременно с `TelegramConfig.enabled`).
+
 `RoleConfig.model` уже существует ([config.py:58](../../tero2/config.py:58)) — никаких новых полей.
 
 ### 4.3 `tero2/providers/catalog.py` — dynamic + static
 
 **Константы:**
-- `DEFAULT_PROVIDERS: list[str] = ["claude", "codex", "opencode", "kilo", "zai", "gemma"]` — 6 CLI. `gemma` — placeholder (заполнится в spec'е Gemma local provider).
+- `DEFAULT_PROVIDERS: list[str] = ["claude", "codex", "opencode", "kilo", "zai", "gemma"]` — 6 CLI. `gemma` — **in development** (full support — отдельный spec [2026-04-18-gemma-telegram-chat-idea.md](2026-04-18-gemma-telegram-chat-idea.md)).
 - `STATIC_CATALOG: dict[str, list[ModelEntry]]` — hardcoded списки для провайдеров без live-команды `models`:
   - `claude`: `sonnet / opus / haiku`.
   - `codex`: `""` (medium), `gpt-5.4` (high).
   - `zai` (native): `glm-5.1`.
-  - `gemma`: `[]` (placeholder).
+  - `gemma`: `[]` — **in development**, в ModelPickScreen пункт отрисовывается disabled с tooltip'ом «in development — см. gemma-telegram-chat-idea spec». Переиспользует тот же disabled-паттерн, что и native-zai без `ZAI_API_KEY` (Risk в §5.2).
 
 **Datatype:** `@dataclass(frozen=True) ModelEntry(id: str, label: str)` — `id` передаётся в CLI (`-m` / `--model`), `label` — UI-friendly.
 
@@ -420,11 +454,13 @@ Textual `Input` сверху + `watch_value` пересчитывает `ListVie
 **Действия по порту:**
 1. Скопировать [tero/src/providers/zai.py](../../../tero/src/providers/zai.py) → `tero2/providers/zai.py`.
 2. Правки импортов: `src.config` → `tero2.config`, `src.constants` → `tero2.constants`.
-3. Зарегистрировать в маппинге CLI-name → provider class (параллельно `CLIProvider`, т.к. zai — native SDK, не subprocess). **Связано с Open Question 4 ниже** — при имплементации M2 нужен unified `ProviderRegistry`, чтобы эти два пути регистрации не дублировались.
+3. Зарегистрировать в существующем [providers/registry.py](../../tero2/providers/registry.py): `register("zai", ZaiProvider)` при импорте `providers/__init__.py`. Никаких изменений в `_PROVIDER_COMMAND_BUILDERS` ([providers/cli.py:17](../../tero2/providers/cli.py:17)) **не нужно** — zai не субпроцессный CLI.
 4. Добавить `claude-agent-sdk` в `pyproject.toml` dependencies если отсутствует.
 5. Ключ читается из `ZAI_API_KEY` env или `~/.claude-zai/settings.json` — как в tero, копирование секрета не требуется.
 
 **Важно:** zai-native параллелен `CLIProvider`, не наследник. Интерфейс (`async def run(self, **kwargs)`, returning AsyncIterator) тот же, что `BaseProvider`. `ProviderChain` работает без изменений.
+
+**Scope `_PROVIDER_COMMAND_BUILDERS`:** мапа остаётся 4 записи (`claude`, `codex`, `opencode`, `kilo`) — она адресует только CLI-субпроцессные провайдеры. `zai` идёт через отдельный `ZaiProvider`, `gemma` пока out-of-scope. Spec'у не нужно расширять эту константу.
 
 ### 4.6 Project-level `.sora/config.toml` — без изменений схемы
 
@@ -441,6 +477,8 @@ tero2/
 │   └── zai.py
 └── tui/
     ├── commands.py
+    ├── widgets/
+    │   └── stuck_hint.py       # 1-строчный widget, заменяет stuck-part of ControlsPanel
     └── screens/
         ├── startup_wizard.py
         ├── project_pick.py
@@ -453,17 +491,18 @@ tero2/
 **Изменённые:**
 ```
 tero2/
-├── cli.py                      # project_path → nargs="?"
+├── cli.py                      # project_path → nargs="?", cmd_go ветвление, cmd_telegram проверяет enabled
 ├── config.py                   # TelegramConfig.enabled
 ├── providers/
-│   ├── cli.py                  # zai env-block пометить как deprecated, не используется
 │   └── registry.py             # регистрация ZaiProvider рядом с CLIProvider
 └── tui/
-    ├── app.py                  # +Header +Footer +actions +COMMANDS
+    ├── app.py                  # +Header +Footer +COMMANDS, +actions, ControlsPanel → StuckHintWidget во всех референсах (_consume_events, _clear_stuck_mode), обновить stuck-options labels
     ├── styles.tcss             # стили для новых screens
     └── screens/
-        └── role_swap.py        # step 3 (model), переиспользует model_pick
+        └── role_swap.py        # step 3 (model), переиспользует model_pick, `_KNOWN_PROVIDERS` → dynamic
 ```
+
+(`providers/cli.py` **не** трогаем — `ZAI_API_KEY` в `env_block` ([cli.py:81](../../tero2/providers/cli.py:81)) это защитная санитизация env для claude CLI, а не «zai env-block». Остаётся как есть.)
 
 **Удалён:**
 ```
@@ -514,31 +553,32 @@ tero2/tui/widgets/controls.py
 ### 5.3 Milestones (для writing-plans)
 
 **M1 — MVP wizard** (закрывает главную боль):
-- `cli.py`: `project_path` → `nargs="?"`
+- `cli.py`: `project_path` → `nargs="?"` **+ ветвление в `cmd_go`** ([cli.py:115](../../tero2/cli.py:115)): `if args.project_path is None: run_startup_wizard()`. Без этого `Path(None)` → `TypeError` crash.
+- `_SKIP_DIRS` → `tero2/constants.py.PROJECT_SCAN_SKIP_DIRS` (рефакторинг перенесён из M2 — нужен в M1 для `PlanPickScreen`).
 - `history.py` + `~/.tero2/history.json`
 - `StartupWizard` + `ProjectPickScreen` + `PlanPickScreen` (без шага 3)
-- `app.py`: `Header` + нативный `Footer`, удаление `ControlsPanel`
-- Добавление BINDINGS `[n]`, `[l]`. В M1 Runner-side handler для `Command("load_plan")` — **стаб**: логирует warning `"load_plan not yet implemented (M2)"` в LogView и игнорирует команду. Хоткей виден в Footer и Command Palette, но не ломает запущенного Runner'а. Полная реализация — в M2.
+- `app.py`: `Header` + нативный `Footer` с **непустыми** labels для stuck-options (`"1 retry"`, `"2 switch"`, `"3 skip"`, `"4 escalate"`, `"5 manual"` вместо текущих `""`); удаление `ControlsPanel` с заменой всех 4 референсов на `StuckHintWidget` в [app.py:17,61,88,107,112,148-150](../../tero2/tui/app.py:17); новый `tui/widgets/stuck_hint.py`; `check_action()` прячет `[1-5]` из Footer вне stuck-state.
+- Добавление BINDINGS `[n]`, `[l]`. `[l]` шлёт **существующий** `Command("new_plan", ...)` ([events.py:29](../../tero2/events.py:29)); Runner уже обрабатывает его в idle-режиме ([runner.py:600](../../tero2/runner.py:600)) — значит `[l]` работает «из коробки» когда Runner idle. Для active-состояния handler в M1 — warning-стаб (`"new_plan during active runner not yet implemented (M2)"`). Полная реализация active-path — в M2.
 - Переименование «стир» → «указание», роли → русские
-- Tests: history, wizard navigation, 2 snapshot-файла
-- **Выход:** `tero2 go` без args запускает wizard → DashboardApp. Runner работает как раньше.
+- Tests: history, wizard navigation, 2 snapshot-файла, smoke-test что `DashboardApp` запускается без `NoMatches` из-за отсутствующего `#controls`.
+- **Выход:** `tero2 go` без args запускает wizard → DashboardApp. Runner работает как раньше, stuck-режим видно через StuckHintWidget.
 
 **M2 — Catalog + runtime provider picker:**
 - `providers/catalog.py` с dynamic fetch + cache + static fallback
 - `ModelPickScreen` с filter-input
-- `role_swap.py`: step 2 → step 2+3 (CLI → модель)
+- `role_swap.py`: step 2 → step 2+3 (CLI → модель). Заменить хардкод `_KNOWN_PROVIDERS` ([role_swap.py:12](../../tero2/tui/screens/role_swap.py:12), сейчас 4 записи) на динамический список из `catalog.DEFAULT_PROVIDERS` — чтобы `zai` появлялся, а `gemma` отрисовывался disabled.
 - `tui/commands.py` + `COMMANDS` в App (Ctrl+P)
-- Runner-side handling `Command("load_plan", ...)` для смены плана на лету
+- Расширить Runner-side handler `Command("new_plan", ...)` на active-state (pause текущий task → checkpoint → load new plan → resume). Idle-path остаётся без изменений. **⚠ Самая сложная часть M2** — требует отдельного mini-design-pass перед реализацией: как именно гасим in-flight provider-subprocess, что пишется в checkpoint, как обрабатывается план, который несовместим с текущим AgentState.
 - `providers/zai.py` порт из tero (native path)
 - Tests: catalog mock, model pick fuzzy filter, zai provider, snapshots
 - **Выход:** можно выбрать и zai (native), и zai/glm-5.1 через opencode из UI. Все модели opencode — live-список.
 
 **M3 — Settings + project-level wizard:**
 - `SettingsScreen` 3 вкладки
-- `TelegramConfig.enabled` + legacy fallback
+- `TelegramConfig.enabled` + legacy fallback **+ обновление `cmd_telegram`** ([cli.py:258](../../tero2/cli.py:258)) для проверки `config.telegram.enabled` перед стартом бота
 - `ProvidersPickScreen` (step 3 wizard'а) + атомарная запись `.sora/config.toml`
 - SORA-invariant в wizard
-- Tests: settings, atomic write, SORA validation, snapshots
+- Tests: settings, atomic write, SORA validation, snapshots, regression-test что `tero2 telegram` отказывается стартовать при `enabled=false`
 - **Выход:** полный scope — глобальные настройки через UI, новые проекты получают `.sora/config.toml` из wizard'а.
 
 Каждая M → отдельная PR → работающее состояние.
@@ -559,10 +599,11 @@ tero2/tui/widgets/controls.py
 
 ## Open Questions
 
-1. **Runner-side изменения для `load_plan` Command** — какой API, где сохраняется текущий checkpoint? Ответить в M2-плане при анализе [runner.py](../../tero2/runner.py).
+1. ~~**Runner-side изменения для `load_plan` Command**~~ — **закрыт**: переиспользуем существующий `Command("new_plan")` ([events.py:29](../../tero2/events.py:29), [runner.py:600](../../tero2/runner.py:600)). Для M2 задача формулируется как «расширить handler `new_plan` на active-state Runner (pause → checkpoint → load → resume)», а не как «спроектировать новый API».
 2. **Добавление роли через Settings** (кнопка `[+] Добавить роль` в tab «Провайдеры») — свободная строка или preset (`builder`/`architect`/...)? Предложение для M3: preset из known SORA-ролей + опция «custom».
 3. **Локализация `DashboardApp` Header** — `self.title` сейчас смешанный русский/латиница. Унифицировать в M1.
-4. **Unified provider registry:** сейчас `CLIProvider` захардкожен под 4 CLI ([providers/cli.py:17](../../tero2/providers/cli.py:17)). Нужен диспатчер `ProviderRegistry` (как в tero), умеющий выбирать между `CLIProvider` и `ZaiProvider` по имени. Разобраться в M2.
+4. ~~**Unified provider registry**~~ — **закрыт**: [providers/registry.py](../../tero2/providers/registry.py) уже существует с `_REGISTRY` / `register()` / `create_provider()`. `ZaiProvider` регистрируется стандартным `register("zai", ZaiProvider)`. `_PROVIDER_COMMAND_BUILDERS` ([providers/cli.py:17](../../tero2/providers/cli.py:17)) остаётся 4 записи — это мапа только для субпроцессных CLI.
+5. **Source of truth для списка провайдеров в UI** — сейчас `_KNOWN_PROVIDERS` ([role_swap.py:12](../../tero2/tui/screens/role_swap.py:12)) хардкодит 4 CLI. В M2 заменяем на динамический fetch из `catalog.DEFAULT_PROVIDERS` + фильтр по registry (`_REGISTRY.keys()` ∪ `_PROVIDER_COMMAND_BUILDERS.keys()`), чтобы `zai` появлялся автоматически, а `gemma` — disabled. Детали в M2-плане.
 
 ---
 

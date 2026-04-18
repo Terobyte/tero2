@@ -16,6 +16,7 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+from tero2.constants import PROJECT_SCAN_SKIP_DIRS as _SKIP_DIRS
 from tero2.disk_layer import DiskLayer
 from tero2.players.base import BasePlayer, PlayerResult
 from tero2.providers.chain import ProviderChain
@@ -172,17 +173,3 @@ def _count_files(working_dir: str) -> int:
         _dirs[:] = [d for d in _dirs if d not in _SKIP_DIRS]
         count += len(files)
     return count
-
-
-_SKIP_DIRS = frozenset(
-    {
-        ".git",
-        ".venv",
-        "node_modules",
-        "__pycache__",
-        ".pytest_cache",
-        ".ruff_cache",
-        ".mypy_cache",
-        "dist",
-    }
-)

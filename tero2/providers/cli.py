@@ -174,8 +174,14 @@ class CLIProvider(BaseProvider):
         )
 
         if stdin_data and proc.stdin:
-            proc.stdin.write(stdin_data)
-            await proc.stdin.drain()
+            try:
+                proc.stdin.write(stdin_data)
+                await proc.stdin.drain()
+            except BrokenPipeError as exc:
+                raise ProviderError(
+                    f"Broken pipe writing to {self._name}: "
+                    f"process exited before stdin was sent"
+                ) from exc
             proc.stdin.close()
             await proc.stdin.wait_closed()
 

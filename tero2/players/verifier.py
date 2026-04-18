@@ -7,6 +7,7 @@ Uses LLM only to analyze must-have coverage, not for the verdict itself.
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 from dataclasses import dataclass
 from typing import Any
@@ -113,7 +114,7 @@ class VerifierPlayer(BasePlayer):
 
 
 def _parse_verdict(output: str, ruff_rc: int, pytest_rc: int) -> str:
-    if "ANOMALY" in output.upper():
+    if re.search(r"\bANOMALY\b", output, re.IGNORECASE):
         return Verdict.ANOMALY
     if ruff_rc != 0 or pytest_rc != 0:
         return Verdict.FAIL

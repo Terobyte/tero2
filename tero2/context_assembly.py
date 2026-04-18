@@ -51,7 +51,7 @@ def estimate_tokens(text: str) -> int:
 
 def _check_budget(tokens: int, budget: int, cfg: ContextConfig) -> BudgetState:
     if budget <= 0:
-        raise ConfigError("context budget must be positive")
+        return BudgetState.HARD_FAIL
     if cfg.target_ratio <= 0:
         raise ConfigError("context target_ratio must be positive")
     ratio = tokens / budget
