@@ -233,7 +233,7 @@ pytest tests/test_history.py -v
 ```
 Expected: all 5 PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tero2/history.py tests/test_history.py
@@ -245,10 +245,10 @@ git commit -m "add history.py with HistoryEntry load/record/trim"
 ### Task 3: StuckHintWidget
 
 **Files:**
-- [ ] Create: `tero2/tui/widgets/stuck_hint.py`
-- [ ] Create: `tests/test_stuck_hint.py`
+- [x] Create: `tero2/tui/widgets/stuck_hint.py`
+- [x] Create: `tests/test_stuck_hint.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # tests/test_stuck_hint.py
@@ -290,14 +290,14 @@ async def test_stuck_hint_text_content():
         assert "switch" in str(rendered)
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 ```
 pytest tests/test_stuck_hint.py -v
 ```
 Expected: `ImportError: cannot import name 'StuckHintWidget'`
 
-- [ ] **Step 3: Implement StuckHintWidget**
+- [x] **Step 3: Implement StuckHintWidget**
 
 **⚠️ Design note:** Use Textual's `display` reactive (hides widget + removes from layout). Do NOT mix CSS `display: none` with `self.visible` — they collide: `visible=True` only clears inline style, CSS rule still hides widget. One mechanism only.
 
@@ -334,7 +334,7 @@ class StuckHintWidget(Static):
         self.display = False
 ```
 
-- [ ] **Step 4: Run tests to verify pass**
+- [x] **Step 4: Run tests to verify pass**
 
 ```
 pytest tests/test_stuck_hint.py -v
