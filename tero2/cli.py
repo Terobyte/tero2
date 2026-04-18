@@ -19,7 +19,7 @@ from pathlib import Path
 
 
 def main() -> None:
-    parser = _build_parser()
+    parser = build_parser()
     args = parser.parse_args()
     if not hasattr(args, "func"):
         parser.print_help()
@@ -95,6 +95,25 @@ def cmd_status(args: argparse.Namespace) -> None:
         print(f"slice:    {state.current_slice}  task: {state.current_task_index}")
 
 
+def run_startup_wizard() -> tuple | None:
+    """Launch StartupWizard, return (project_path, plan_file) or None on cancel."""
+    from tero2.tui.screens.startup_wizard import StartupWizard
+    from textual.app import App
+
+    result_holder = []
+
+    class _WizardApp(App):
+        def on_mount(self) -> None:
+            self.push_screen(StartupWizard(), self._done)
+
+        def _done(self, result) -> None:
+            result_holder.append(result)
+            self.exit()
+
+    _WizardApp().run()
+    return result_holder[0] if result_holder else None
+
+
 def cmd_go(args: argparse.Namespace) -> None:
     try:
         from textual import __version__ as _  # noqa: F401
@@ -112,26 +131,32 @@ def cmd_go(args: argparse.Namespace) -> None:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
 
-    project_path = Path(args.project_path).expanduser().resolve()
+    if args.project_path is None:
+        result = run_startup_wizard()
+        if result is None:
+            sys.exit(0)
+        project_path, plan_file = result
+    else:
+        project_path = Path(args.project_path).expanduser().resolve()
 
-    if not project_path.is_dir():
-        print(f"error: {project_path} is not a directory")
-        sys.exit(1)
+        if not project_path.is_dir():
+            print(f"error: {project_path} is not a directory")
+            sys.exit(1)
 
-    plan_file = None
-    if args.plan:
-        pf = Path(args.plan).expanduser()
-        if not pf.is_absolute():
-            pf = (project_path / pf).resolve()
-        else:
-            pf = pf.resolve()
-        if not pf.is_relative_to(project_path):
-            print(f"error: plan file must be inside project directory: {pf}")
-            sys.exit(1)
-        if not pf.is_file():
-            print(f"error: plan file not found: {pf}")
-            sys.exit(1)
-        plan_file = pf
+        plan_file = None
+        if args.plan:
+            pf = Path(args.plan).expanduser()
+            if not pf.is_absolute():
+                pf = (project_path / pf).resolve()
+            else:
+                pf = pf.resolve()
+            if not pf.is_relative_to(project_path):
+                print(f"error: plan file must be inside project directory: {pf}")
+                sys.exit(1)
+            if not pf.is_file():
+                print(f"error: plan file not found: {pf}")
+                sys.exit(1)
+            plan_file = pf
 
     config = None
     if args.config:
@@ -272,7 +297,7 @@ def cmd_telegram(args: argparse.Namespace) -> None:
         print("bot stopped")
 
 
-def _build_parser() -> argparse.ArgumentParser:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tero2", description="Immortal Runner")
 
     subparsers = parser.add_subparsers(dest="command")
@@ -298,7 +323,7 @@ def _build_parser() -> argparse.ArgumentParser:
     telegram_parser.set_defaults(func=cmd_telegram)
 
     go_parser = subparsers.add_parser("go", help="Launch TUI dashboard")
-    go_parser.add_argument("project_path", help="Path to the project root")
+    go_parser.add_argument("project_path", nargs="?", default=None, help="path to project (omit to open wizard)")
     go_parser.add_argument("--plan", help="Path to the markdown plan file (optional)")
     go_parser.add_argument(
         "--idle-timeout",
