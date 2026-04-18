@@ -39,6 +39,8 @@ class PlanPickScreen(ModalScreen[Path | None]):
         files: list[Path] = []
         try:
             for p in self._project_path.rglob("*.md"):
+                if not p.is_file():
+                    continue
                 if any(part in _SKIP for part in p.parts):
                     continue
                 files.append(p)

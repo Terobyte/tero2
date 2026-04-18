@@ -856,7 +856,7 @@ pytest tests/test_plan_pick.py -v
 ```
 Expected: all PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tero2/tui/screens/plan_pick.py tests/test_plan_pick.py

@@ -1,12 +1,4 @@
-"""Tests for PlanPickScreen — plan file selection modal.
-
-These tests are written against the PLANNED requirements (requirements.md Task 6).
-They are expected to FAIL against the current implementation because:
-  - Current impl uses `_plan_files`, not `_files`
-  - Current impl does not skip `.git` or `.sora` directories
-  - Current impl has no `i` binding for idle mode
-  - Current impl shows a placeholder instead of auto-dismissing when no .md files
-"""
+"""Tests for PlanPickScreen — plan file selection modal (requirements.md Task 6)."""
 
 from pathlib import Path
 
