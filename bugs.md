@@ -2,6 +2,8 @@
 
 Full codebase audit via 4 parallel agents. 32 unique bugs after deduplication.
 
+**Fixed:** 1, 2, 6, 7, 8, 9, 10, 14, 15, 16, 17, 20, 23, 35, 38, 39 (2026-04-18)
+
 ## CRITICAL (9)
 
 ### 1. state.from_json silent failure
@@ -18,6 +20,7 @@ Full codebase audit via 4 parallel agents. 32 unique bugs after deduplication.
 **File:** `tero2/events.py:163-176`
 Direct deque manipulation with manual `_unfinished_tasks` decrement. Exception between lines 168-175 corrupts count.
 **Fix:** Use try/finally or proper queue operations.
+**Fixed:** Removed redundant `_unfinished_tasks -= 1 / += 1` pair in the swap path. A del+append swap is net-zero; only the overflow path (all-priority queue) legitimately increments the counter. Tests: `TestBug3UnfinishedTasksInvariant` (5 tests).
 
 ### 4. lock.py race condition on acquire retry
 **File:** `tero2/lock.py:27-31`
@@ -72,6 +75,7 @@ SIGTERM/SIGINT can arrive between event creation and handler setup.
 **File:** `tero2/state.py:93-102`
 First assignment skips validation. Loading JSON with invalid phases accepted.
 **Fix:** Add post-load validation in `from_json()`.
+**Fixed (by design):** The bypass is intentional for crash recovery — any valid saved Phase/SoraPhase must be restorable from disk. Invalid strings are coerced to IDLE/NONE via per-field enum coercion (lines 143–151). Tests: `TestBug13SetAttrBypassIsIntentional` (3 tests).
 
 ### 14. architect: disk write outside try/except
 **File:** `tero2/players/architect.py:116`
@@ -93,6 +97,7 @@ Same issue as #14.
 **File:** `tero2/circuit_breaker.py:28-37`
 `check()` returns None in HALF_OPEN. Without `record_success()`, stays HALF_OPEN indefinitely.
 **Fix:** Allow one trial request; block subsequent until success/failure recorded.
+**Fixed:** `_trial_in_progress` flag added. First `check()` in HALF_OPEN sets it and returns; subsequent calls raise `CircuitOpenError` until `record_success()` or `record_failure()` clears it. Tests: `TestBug18HalfOpenOneTrial` (3 tests).
 
 ### 19. usage_tracker: race condition on shared dict
 **File:** `tero2/usage_tracker.py:106-126`
@@ -129,10 +134,12 @@ Large `attempt` → float overflow. Cap at `min(attempt-1, 10)`.
 ### 25. disk_layer: can't distinguish empty vs missing vs permission denied
 **File:** `tero2/disk_layer.py:42-94`
 `read_file` returns `""` for all error cases.
+**Fixed:** Separate exception handlers: `FileNotFoundError → None`, other `OSError → ""`. Missing file is now distinguishable from an empty file (`None` vs `""`). Tests: `TestBug25DiskLayerErrorTypes` (3 tests).
 
 ### 26. context_assembly: O(n²) optional section processing
 **File:** `tero2/context_assembly.py:144-154`
 Rebuilds entire string for each optional section check.
+**Fixed:** O(n) incremental token accumulation. Instead of rebuilding the full candidate string per iteration, a running `running_tokens` total is updated when a section is accepted. Also restored `raise ConfigError` for `target_ratio <= 0` (was accidentally changed to silent `HARD_FAIL`). Tests: `TestBug26ContextAssemblyPriorityOrder` (4 tests).
 
 ### 27. telegram_input: no file size check on download
 **File:** `tero2/telegram_input.py:277-298`
@@ -149,10 +156,12 @@ State partially updated if checkpoint fails mid-level.
 ### 30. stuck_detection: mutates state in-place
 **File:** `tero2/stuck_detection.py:84-101`
 Caller doesn't expect `state.last_tool_hash` to change as side effect.
+**Fixed:** `update_tool_hash` uses `dataclasses.replace()` and returns a new `AgentState`; original is never mutated. Tests: `TestBug30NoStateMutation` (3 tests).
 
 ### 31. ProviderChain: index not updated on circuit breaker skip
 **File:** `tero2/providers/chain.py:72-73`
 `_current_provider_index` stale when provider skipped via open circuit breaker.
+**Fixed:** Index is set AFTER the `cb.is_available` check, so skipped providers never update it. A skipped provider leaves the index at its previous value; the next available provider sets it correctly. Also fixed `yield from messages` (invalid in async generators) → `for msg in messages: yield msg`. Tests: `TestBug31ProviderChainIndexUpdate` (1 test).
 
 ### 32. TUI screens: stat() in sort without try/except
 **File:** `tero2/tui/screens/project_pick.py:38-46`, `tero2/tui/screens/plan_pick.py:38-50`
@@ -242,6 +251,7 @@ plan_str = plan_file.name if plan_file else None  # "plan.md" — ambiguous
 Projects with multiple `plan.md` files in different subdirs produce identical `last_plan` values. Any future feature that auto-selects the last plan cannot identify the correct file.
 
 **Fix:** Store `str(plan_file.relative_to(project_path))` — needs `project_path` threaded into `record_run`.
+**Fixed:** `record_run` already uses `plan_file.relative_to(project_path)` with fallback to `plan_file.name` for out-of-project paths. Tests: `TestBug37HistoryRelativePath` (2 tests).
 
 ---
 
