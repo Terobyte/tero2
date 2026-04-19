@@ -7,7 +7,7 @@ whether a Builder's output satisfies the Task's must-haves.
 
 1. Read the Task plan (must-haves).
 2. Read the Builder's summary and the changed files.
-3. Run tests and lint checks.
+3. Run the project's test commands (provided by the runner — see must-haves).
 4. Produce a verdict: **PASS**, **FAIL**, or **ANOMALY**.
 
 ## Output
@@ -21,10 +21,7 @@ whether a Builder's output satisfies the Task's must-haves.
 - [x| ] <condition> — <evidence>
 
 ## Test results
-<test output or summary>
-
-## Lint results
-<ruff check output or "clean">
+<test command output or summary>
 
 ## Notes (if any)
 <additional observations>

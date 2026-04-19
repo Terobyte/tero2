@@ -11,7 +11,6 @@ class Tero2CommandProvider(Provider):
     async def search(self, query: str) -> Hits:
         matcher = self.matcher(query)
         commands = [
-            ("Открыть новый проект", "new_project"),
             ("Сменить план", "change_plan"),
             ("Сменить провайдера роли", "roles"),
             ("Отправить указание агенту", "steer"),

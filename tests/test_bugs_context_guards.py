@@ -31,34 +31,32 @@ class TestBug26ParseVerdictCheckOrder:
     """
 
     def test_empty_output_both_rc_zero_returns_pass(self):
-        """_parse_verdict('', 0, 0) must return PASS, not ANOMALY."""
+        """_parse_verdict('', [0, 0]) must return PASS, not ANOMALY."""
         from tero2.players.verifier import Verdict, _parse_verdict
 
-        verdict = _parse_verdict("", 0, 0)
+        verdict = _parse_verdict("", [0, 0])
         assert verdict == Verdict.PASS, (
-            "Bug 26: empty output with ruff_rc=0, pytest_rc=0 must return PASS. "
-            "The `not output.strip()` guard fires before the rc check, "
-            f"returning ANOMALY instead. Got: {verdict!r}"
+            "Bug 26: empty output with all rc=0 must return PASS. "
+            f"Got: {verdict!r}"
         )
 
     def test_newline_only_output_both_rc_zero_returns_pass(self):
         """ruff on a clean codebase produces no output; combined becomes '\\n'."""
         from tero2.players.verifier import Verdict, _parse_verdict
 
-        verdict = _parse_verdict("\n", 0, 0)
+        verdict = _parse_verdict("\n", [0, 0])
         assert verdict == Verdict.PASS, (
-            "Bug 26: '\\n' output (ruff clean + pytest silent) with rc=0,0 "
-            f"must be PASS, got: {verdict!r}"
+            "Bug 26: '\\n' output with rc=[0,0] must be PASS. "
+            f"Got: {verdict!r}"
         )
 
     def test_empty_output_nonzero_ruff_rc_returns_fail(self):
         """After fix (rc check first), empty output + ruff_rc=1 must be FAIL."""
         from tero2.players.verifier import Verdict, _parse_verdict
 
-        verdict = _parse_verdict("", 1, 0)
+        verdict = _parse_verdict("", [1, 0])
         assert verdict == Verdict.FAIL, (
-            "Bug 26: empty output + ruff_rc=1 must return FAIL (rc checked first). "
-            "Current code returns ANOMALY because the empty-output guard fires first. "
+            "Bug 26: empty output + rc=[1,0] must return FAIL. "
             f"Got: {verdict!r}"
         )
 

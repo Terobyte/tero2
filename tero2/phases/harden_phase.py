@@ -23,6 +23,7 @@ import re
 
 from tero2.context_assembly import ContextAssembler
 from tero2.phases.context import PhaseResult, RunnerContext
+from tero2.players.reviewer import ReviewerPlayer
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +63,7 @@ async def run_harden(ctx: RunnerContext) -> PhaseResult:
         log.error("harden: cannot build reviewer chain: %s", exc)
         return PhaseResult(success=False, error=f"reviewer role not configured: {exc}")
 
+    player = ReviewerPlayer(chain, ctx.disk)
     assembler = ContextAssembler(
         ctx.config,
         system_prompts={
@@ -87,12 +89,12 @@ async def run_harden(ctx: RunnerContext) -> PhaseResult:
         review_assembled = assembler.assemble_reviewer(current_plan, mode="review")
         review_prompt = _combine_prompt(review_assembled)
 
-        try:
-            review_output = await chain.run_prompt_collected(review_prompt)
-        except Exception as exc:
-            log.error("harden: reviewer (find-issues) failed in round %d: %s", round_num, exc)
-            return PhaseResult(success=False, error=str(exc))
+        review_result = await player.run(mode="review", prompt=review_prompt)
+        if not review_result.success:
+            log.error("harden: reviewer (find-issues) failed in round %d: %s", round_num, review_result.error)
+            return PhaseResult(success=False, error=review_result.error)
 
+        review_output = review_result.verdict
         verdict = _parse_verdict(review_output)
         if debug:
             log.info("harden round %d verdict: %s", round_num, verdict)
@@ -124,16 +126,15 @@ async def run_harden(ctx: RunnerContext) -> PhaseResult:
 
         # ── Fix pass (CRITICAL or cosmetic without stop_on_cosmetic) ─────
         fix_assembled = assembler.assemble_reviewer(current_plan, mode="fix")
-        fix_prompt = _combine_prompt(fix_assembled) + f"\n\n## Reviewer Findings\n{review_output}"
+        fix_prompt = _combine_prompt(fix_assembled)
 
-        try:
-            fixed_plan = await chain.run_prompt_collected(fix_prompt)
-        except Exception as exc:
-            log.error("harden: reviewer (apply-fixes) failed in round %d: %s", round_num, exc)
-            return PhaseResult(success=False, error=str(exc))
+        fix_result = await player.run(mode="fix", prompt=fix_prompt, review_findings=review_output)
+        if not fix_result.success:
+            log.error("harden: reviewer (apply-fixes) failed in round %d: %s", round_num, fix_result.error)
+            return PhaseResult(success=False, error=fix_result.error)
 
-        if fixed_plan.strip():
-            current_plan = fixed_plan.strip()
+        if fix_result.fixed_plan:
+            current_plan = fix_result.fixed_plan
 
         # Write intermediate version for debugging / recovery
         ctx.disk.write_file(f"{ctx.milestone_path}/plan_v{round_num}.md", current_plan)

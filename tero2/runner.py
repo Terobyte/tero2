@@ -448,7 +448,12 @@ class Runner:
             state, cont = await self._drain_commands(state)
             if not cont:
                 return
-            await run_harden(ctx)
+            harden_result = await run_harden(ctx)
+            if not harden_result.success:
+                msg = f"Harden failed: {harden_result.error}"
+                await self.notifier.notify(msg, NotifyLevel.ERROR)
+                await self._emit_error(msg)
+                return
 
         if "scout" in self.config.roles and not _phase_already_done(
             state.sora_phase, SoraPhase.SCOUT
@@ -459,7 +464,10 @@ class Runner:
             state, cont = await self._drain_commands(state)
             if not cont:
                 return
-            await run_scout(ctx)
+            scout_result = await run_scout(ctx)
+            if not scout_result.success:
+                # Scout is non-fatal — reduced context quality is acceptable.
+                log.warning("scout phase did not succeed (non-fatal): %s", scout_result.error)
 
         if "coach" in self.config.roles and not _phase_already_done(
             state.sora_phase, SoraPhase.COACH
@@ -470,7 +478,10 @@ class Runner:
             state, cont = await self._drain_commands(state)
             if not cont:
                 return
-            await run_coach(ctx, CoachTrigger.FIRST_RUN)
+            coach_result = await run_coach(ctx, CoachTrigger.FIRST_RUN)
+            if not coach_result.success:
+                # Coach is non-fatal — previous strategic documents remain on disk.
+                log.warning("coach phase did not succeed (non-fatal): %s", coach_result.error)
 
         if not _phase_already_done(state.sora_phase, SoraPhase.ARCHITECT):
             state = self.checkpoint.set_sora_phase(state, SoraPhase.ARCHITECT)

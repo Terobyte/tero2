@@ -108,6 +108,10 @@ async def run_execute(
                 error=f"verifier misconfiguration: {exc}",
             )
 
+    # Commands from [verifier] config take priority; per-task must-have commands
+    # are extracted as a fallback when no explicit config is present.
+    global_verify_commands = list(ctx.config.verifier.commands)
+
     working_dir = str(ctx.disk.project_path)
     persona_prompt = ctx.personas.load_or_default("builder").system_prompt
     context_hints = ctx.disk.read_file("strategic/CONTEXT_HINTS.md") or ""
@@ -304,9 +308,11 @@ async def run_execute(
                 ctx.disk,
                 working_dir=working_dir,
             )
+            verify_commands = global_verify_commands or _extract_must_have_commands(task)
             verify_result = await verifier.run(
                 builder_output=builder_result.captured_output,
                 task_id=task.id,
+                verify_commands=verify_commands,
             )
 
             if verify_result.success:
@@ -457,6 +463,32 @@ def _check_override(
 
 _RE_STOP = re.compile(r"^\s*STOP\s*$", re.MULTILINE | re.IGNORECASE)
 _RE_PAUSE = re.compile(r"^\s*PAUSE\s*$", re.MULTILINE | re.IGNORECASE)
+
+# Matches command-like text in must-have strings.
+# Group 1: backtick-quoted inline command  e.g. "`swift test`"
+# Group 2: line starting with a known CLI tool (after "- " prefix already stripped)
+_CMD_RE = re.compile(
+    r"`([^`]+)`"   # backtick-quoted inline command
+    r"|(?:^|[-*]\s*)((?:cd|swift|ctest|make|cmake|cargo|npm|yarn|pnpm|pytest|go|\./)[^\n`]*)",
+    re.MULTILINE,
+)
+
+
+def _extract_must_have_commands(task: Task) -> list[str]:
+    """Extract shell commands from a Task's must-have list.
+
+    Looks for backtick-quoted commands and bullet lines beginning with known
+    executables (swift, ctest, make, etc.).  Returns empty list when no
+    command-like must-haves are found, causing the Verifier to use its
+    default Python fallback (ruff + pytest).
+    """
+    cmds: list[str] = []
+    for item in task.must_haves:
+        for match in _CMD_RE.finditer(item):
+            cmd = (match.group(1) or match.group(2) or "").strip()
+            if cmd and cmd not in cmds:
+                cmds.append(cmd)
+    return cmds
 
 
 def _update_task_metrics(disk: DiskLayer, task_id: str, passed: bool) -> None:

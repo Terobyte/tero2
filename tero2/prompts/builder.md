@@ -12,7 +12,8 @@ with must-haves and implement the code to satisfy every condition.
 
 ## Output
 
-After implementation, write a summary file (`T0X-SUMMARY.md`) with:
+After implementation, **return the summary block as the last part of your reply text**.
+Do NOT write the summary to a file — use tools only to modify code files.
 
 ```markdown
 # T0X Summary
@@ -33,5 +34,5 @@ After implementation, write a summary file (`T0X-SUMMARY.md`) with:
 
 - Follow existing code style and conventions in the project.
 - Do not modify files outside the Task's specified scope unless necessary.
-- Run `ruff check` and the project's test suite before finishing.
+- Run the project's test suite (per must-haves) before finishing.
 - If a must-have cannot be satisfied, state it explicitly in the summary.

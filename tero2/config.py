@@ -5,6 +5,7 @@ Priority: project .sora/config.toml > global ~/.tero2/config.toml > defaults.
 
 from __future__ import annotations
 
+import logging
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,6 +22,8 @@ from tero2.constants import (
     RATE_LIMIT_WAIT_S,
 )
 from tero2.errors import ConfigError
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -78,6 +81,11 @@ class TelegramConfig:
 
 
 @dataclass
+class VerifierConfig:
+    commands: list[str] = field(default_factory=list)
+
+
+@dataclass
 class RetryConfig:
     max_retries: int = MAX_TASK_RETRIES
     chain_retry_wait_s: float = DEFAULT_CHAIN_RETRY_WAIT_S
@@ -102,6 +110,7 @@ class Config:
     reflexion: ReflexionConfig = field(default_factory=ReflexionConfig)
     plan_hardening: PlanHardeningConfig = field(default_factory=PlanHardeningConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
+    verifier: VerifierConfig = field(default_factory=VerifierConfig)
     max_slices: int = 50
     idle_timeout_s: int = 0
 
@@ -165,6 +174,23 @@ def _parse_config(raw: dict) -> Config:
                 f"roles.builder requires roles.architect and roles.verifier; "
                 f"missing: {', '.join(missing)}"
             )
+
+    # Early validation for optional scout/coach roles
+    from tero2.providers.catalog import DEFAULT_PROVIDERS  # noqa: PLC0415
+
+    for optional_role in ("scout", "coach"):
+        role_cfg = cfg.roles.get(optional_role)
+        if role_cfg is not None:
+            if role_cfg.provider not in DEFAULT_PROVIDERS:
+                log.warning(
+                    "roles.%s references unknown provider %r "
+                    "(known: %s) — chain build will fail at runtime",
+                    optional_role,
+                    role_cfg.provider,
+                    ", ".join(DEFAULT_PROVIDERS),
+                )
+        elif "builder" in cfg.roles:
+            log.info("roles.%s not configured — %s phase will be skipped", optional_role, optional_role)
 
     tg = raw.get("telegram", {})
     if tg:
@@ -234,6 +260,12 @@ def _parse_config(raw: dict) -> Config:
             warning_ratio=ctx.get("warning_ratio", 0.80),
             hard_fail_ratio=ctx.get("hard_fail_ratio", 0.95),
             skip_scout_if_files_lt=ctx.get("skip_scout_if_files_lt", 20),
+        )
+
+    ver = raw.get("verifier", {})
+    if ver:
+        cfg.verifier = VerifierConfig(
+            commands=list(ver.get("commands", [])),
         )
 
     sora = raw.get("sora", {})

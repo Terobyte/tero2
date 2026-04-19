@@ -389,7 +389,7 @@ class TestBuilderPlayer:
 
         captured_calls: list[tuple] = []
 
-        async def _fake_run_agent(_ctx, ch, prompt: str) -> tuple[bool, str]:
+        async def _fake_run_agent(_ctx, ch, prompt: str, **kwargs) -> tuple[bool, str]:
             captured_calls.append((ch, prompt))
             return True, "agent wrote the files\n\nSummary: done"
 
@@ -424,7 +424,7 @@ class TestBuilderPlayer:
         disk = _make_disk(tmp_path)
         builder = BuilderPlayer(chain, disk)
 
-        async def _failing_run_agent(_ctx, ch, prompt: str) -> tuple[bool, str]:
+        async def _failing_run_agent(_ctx, ch, prompt: str, **kwargs) -> tuple[bool, str]:
             return False, "partial output before step limit"
 
         ctx = type("Ctx", (), {"run_agent": _failing_run_agent})()
@@ -458,27 +458,27 @@ class TestVerifierVerdictParsing:
     def test_pass_when_both_succeed(self):
         from tero2.players.verifier import Verdict, _parse_verdict
 
-        assert _parse_verdict("all good", 0, 0) == Verdict.PASS
+        assert _parse_verdict("all good", [0, 0]) == Verdict.PASS
 
     def test_fail_on_ruff_error(self):
         from tero2.players.verifier import Verdict, _parse_verdict
 
-        assert _parse_verdict("lint issue", 1, 0) == Verdict.FAIL
+        assert _parse_verdict("lint issue", [1, 0]) == Verdict.FAIL
 
     def test_fail_on_pytest_error(self):
         from tero2.players.verifier import Verdict, _parse_verdict
 
-        assert _parse_verdict("test failed", 0, 1) == Verdict.FAIL
+        assert _parse_verdict("test failed", [0, 1]) == Verdict.FAIL
 
     def test_anomaly_detected_first(self):
         from tero2.players.verifier import Verdict, _parse_verdict
 
-        assert _parse_verdict("ANOMALY detected", 1, 1) == Verdict.ANOMALY
+        assert _parse_verdict("ANOMALY detected", [1, 1]) == Verdict.ANOMALY
 
     def test_fail_does_not_match_pass_substring(self):
         from tero2.players.verifier import Verdict, _parse_verdict
 
-        assert _parse_verdict("PASS was not achieved", 0, 1) == Verdict.FAIL
+        assert _parse_verdict("PASS was not achieved", [0, 1]) == Verdict.FAIL
 
 
 class TestVerifierPlayer:

@@ -101,19 +101,19 @@ class TestBug63ParseVerdictAnomalyFalsePositive:
         from tero2.players.verifier import _parse_verdict, Verdict
 
         output = "test_anomaly_detection PASSED\n2 passed"
-        assert _parse_verdict(output, ruff_rc=0, pytest_rc=0) == Verdict.PASS
+        assert _parse_verdict(output, [0, 0]) == Verdict.PASS
 
     def test_anomaly_in_module_path_with_rc0_returns_pass(self):
         from tero2.players.verifier import _parse_verdict, Verdict
 
         output = "tests/test_anomaly_utils.py::test_ok PASSED"
-        assert _parse_verdict(output, ruff_rc=0, pytest_rc=0) == Verdict.PASS
+        assert _parse_verdict(output, [0, 0]) == Verdict.PASS
 
     def test_real_anomaly_keyword_returns_anomaly(self):
         from tero2.players.verifier import _parse_verdict, Verdict
 
         output = "ANOMALY detected in output"
-        assert _parse_verdict(output, ruff_rc=0, pytest_rc=0) == Verdict.ANOMALY
+        assert _parse_verdict(output, [0, 0]) == Verdict.ANOMALY
 
 
 # ── Bug 69: BrokenPipeError on stdin write ──────────────────────────────

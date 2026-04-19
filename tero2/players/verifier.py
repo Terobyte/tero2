@@ -1,13 +1,16 @@
 """Verifier player -- checks Builder output for correctness.
 
-Runs ruff check and pytest as subprocesses to determine PASS/FAIL/ANOMALY.
-Uses LLM only to analyze must-have coverage, not for the verdict itself.
+Runs project-configured commands (from ``[verifier].commands`` in config, or
+extracted from the Task's must-haves) to determine PASS/FAIL/ANOMALY.
+Falls back to ``ruff check . && pytest -x`` for Python projects when no
+commands are provided.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+import shlex
 import subprocess
 from dataclasses import dataclass
 from typing import Any
@@ -58,8 +61,38 @@ def _run_subprocess(cmd: list[str], cwd: str) -> tuple[int, str, str]:
         return -1, "", f"command timed out: {' '.join(cmd)}"
 
 
+def _run_shell(cmd_str: str, cwd: str) -> tuple[int, str, str]:
+    """Run a shell command string (supports &&, ||, cd, pipes)."""
+    try:
+        proc = subprocess.run(
+            cmd_str,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            shell=True,
+        )
+        return proc.returncode, proc.stdout, proc.stderr
+    except subprocess.TimeoutExpired:
+        return -1, "", f"command timed out: {cmd_str}"
+
+
+_SHELL_OPS = re.compile(r"&&|\|\||[|;]|\bcd\b")
+
+
+def _run_command(cmd_str: str, cwd: str) -> tuple[int, str, str]:
+    """Dispatch to shell or subprocess based on command complexity."""
+    if _SHELL_OPS.search(cmd_str):
+        return _run_shell(cmd_str, cwd)
+    try:
+        parts = shlex.split(cmd_str)
+    except ValueError:
+        return _run_shell(cmd_str, cwd)
+    return _run_subprocess(parts, cwd)
+
+
 class VerifierPlayer(BasePlayer):
-    """Verify Builder output by running ruff and pytest."""
+    """Verify Builder output by running project-configured test commands."""
 
     role = "verifier"
 
@@ -75,25 +108,31 @@ class VerifierPlayer(BasePlayer):
     async def run(self, **kwargs: Any) -> VerifierResult:
         builder_output: str = kwargs.get("builder_output", "")
         task_id: str = kwargs.get("task_id", "T01")
+        verify_commands: list[str] = kwargs.get("verify_commands", [])
 
         cwd = self.working_dir or "."
         try:
-            ruff_rc, ruff_out, ruff_err = _run_subprocess(
-                ["ruff", "check", "."],
-                cwd,
-            )
-            pytest_rc, pytest_out, pytest_err = _run_subprocess(
-                ["pytest", "-x"],
-                cwd,
-            )
-            ruff_output = ruff_out + ruff_err
-            pytest_output = pytest_out + pytest_err
+            if not verify_commands:
+                # Python project fallback
+                verify_commands = ["ruff check .", "pytest -x"]
 
-            combined = ruff_output + "\n" + pytest_output
-            verdict = _parse_verdict(combined, ruff_rc, pytest_rc)
+            all_output: list[str] = []
+            all_rc: list[int] = []
+            for cmd_str in verify_commands:
+                log.debug("verifier: running %r in %s", cmd_str, cwd)
+                rc, out, err = _run_command(cmd_str, cwd)
+                all_output.append(out + err)
+                all_rc.append(rc)
+
+            combined = "\n".join(all_output)
+            verdict = _parse_verdict(combined, all_rc)
             report = verdict + "\n" + combined
-            failed_tests = _extract_list(pytest_output, "FAILED")
+            failed_tests = _extract_list(combined, "FAILED")
             must_haves_failed = _extract_list(builder_output, "must-haves")
+
+            # Preserve ruff/pytest fields when using default Python commands.
+            ruff_output = all_output[0] if len(all_output) > 0 else ""
+            pytest_output = all_output[1] if len(all_output) > 1 else ""
 
             return VerifierResult(
                 success=(verdict == Verdict.PASS),
@@ -113,17 +152,15 @@ class VerifierPlayer(BasePlayer):
             )
 
 
-def _parse_verdict(output: str, ruff_rc: int, pytest_rc: int) -> str:
+def _parse_verdict(output: str, return_codes: list[int]) -> str:
     if re.search(r"\bANOMALY\b", output, re.IGNORECASE):
         return Verdict.ANOMALY
-    if ruff_rc != 0 or pytest_rc != 0:
+    if any(rc != 0 for rc in return_codes):
         return Verdict.FAIL
     return Verdict.PASS
 
 
 def _extract_list(output: str, label: str) -> list[str]:
-    import re
-
     pattern = re.compile(rf"{re.escape(label)}\s*(.+)$", re.MULTILINE | re.IGNORECASE)
     matches = pattern.findall(output)
     items: list[str] = []
