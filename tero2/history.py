@@ -33,7 +33,13 @@ def record_run(project_path: Path, plan_file: Path | None) -> None:
     path_str = str(project_path.expanduser().resolve())
     name = project_path.name
     now = datetime.now(timezone.utc).isoformat()
-    plan_str = plan_file.name if plan_file else None
+    if plan_file:
+        try:
+            plan_str: str | None = str(plan_file.relative_to(project_path))
+        except ValueError:
+            plan_str = plan_file.name
+    else:
+        plan_str = None
 
     for entry in entries:
         if entry.path == path_str:

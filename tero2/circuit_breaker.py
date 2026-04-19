@@ -24,6 +24,7 @@ class CircuitBreaker:
     state: CBState = CBState.CLOSED
     failure_count: int = 0
     last_failure_time: float = 0.0
+    _trial_in_progress: bool = False
 
     def check(self) -> None:
         if self.state == CBState.CLOSED:
@@ -31,20 +32,26 @@ class CircuitBreaker:
         if self.state == CBState.OPEN:
             if time.monotonic() - self.last_failure_time >= self.recovery_timeout_s:
                 self.state = CBState.HALF_OPEN
+                self._trial_in_progress = True  # this call IS the trial
                 return
             raise CircuitOpenError(self.name)
         if self.state == CBState.HALF_OPEN:
+            if self._trial_in_progress:
+                raise CircuitOpenError(self.name)
+            self._trial_in_progress = True
             return
 
     def record_success(self) -> None:
         self.failure_count = 0
         self.state = CBState.CLOSED
+        self._trial_in_progress = False
 
     def record_failure(self) -> None:
         self.failure_count += 1
         self.last_failure_time = time.monotonic()
-        if self.failure_count >= self.failure_threshold:
+        if self.state == CBState.HALF_OPEN or self.failure_count >= self.failure_threshold:
             self.state = CBState.OPEN
+            self._trial_in_progress = False
 
     @property
     def is_available(self) -> bool:

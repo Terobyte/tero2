@@ -107,6 +107,10 @@ class Runner:
                 if self.plan_file is None:
                     await self._idle_loop(_shutdown_event)
                     return
+                if not self.plan_file.is_file():
+                    log.error("plan file not found: %s", self.plan_file)
+                    await self._idle_loop(_shutdown_event)
+                    return
                 state = self.checkpoint.mark_started(str(self.plan_file))
                 self._current_state = state
                 await self.notifier.notify("started", NotifyLevel.PROGRESS)
@@ -219,15 +223,18 @@ class Runner:
             if cmd.kind == "switch_provider":
                 role = cmd.data.get("role", "")
                 provider = cmd.data.get("provider", "")
+                model = cmd.data.get("model", "")
                 if role and provider and role in self.config.roles:
                     self.config.roles[role].provider = provider
-                    log.info("hot-swap: %s provider → %s", role, provider)
+                    if "model" in cmd.data:
+                        self.config.roles[role].model = model
+                    log.info("hot-swap: %s provider → %s model → %s", role, provider, model or "(unchanged)")
                     if self._dispatcher is not None:
                         await self._dispatcher.emit(
                             make_event(
                                 "provider_switch",
                                 role=role,
-                                data={"role": role, "provider": provider},
+                                data={"role": role, "provider": provider, "model": model},
                                 priority=True,
                             )
                         )
@@ -287,7 +294,7 @@ class Runner:
 
             if attempt > 0:
                 wait = min(
-                    retry_cfg.chain_retry_wait_s * retry_cfg.backoff_base ** (attempt - 1),
+                    retry_cfg.chain_retry_wait_s * retry_cfg.backoff_base ** min(attempt - 1, 10),
                     300,
                 )
                 jitter = random.uniform(0, retry_cfg.chain_retry_wait_s * 0.1)
@@ -319,7 +326,24 @@ class Runner:
                         if shutdown_event and shutdown_event.is_set():
                             log.info("shutdown requested during PAUSE — exiting")
                             return
-                        await asyncio.sleep(60)
+                        for _ in range(12):  # 12 × 5 s = 60 s max
+                            await asyncio.sleep(5)
+                            _poll = await self._check_override()
+                            if _poll and self._RE_STOP.search(_poll):
+                                state = self.checkpoint.mark_failed(
+                                    state, "STOP directive in OVERRIDE.md"
+                                )
+                                self._current_state = state
+                                await self.notifier.notify(
+                                    "stopped by OVERRIDE.md", NotifyLevel.ERROR
+                                )
+                                await self._emit_error("stopped by OVERRIDE.md")
+                                return
+                            if shutdown_event and shutdown_event.is_set():
+                                log.info("shutdown requested during PAUSE — exiting")
+                                return
+                            if not await self._override_contains_pause():
+                                break
                     # PAUSE is gone — but it may have been replaced by STOP
                     override_after_pause = await self._check_override()
                     if override_after_pause and self._RE_STOP.search(override_after_pause):
@@ -360,7 +384,9 @@ class Runner:
                 return
 
             truncated_output = (
-                captured_output[:MAX_BUILDER_OUTPUT_CHARS] + "... [truncated]"
+                captured_output.encode("utf-8")[:MAX_BUILDER_OUTPUT_CHARS]
+                .decode("utf-8", errors="ignore")
+                + "... [truncated]"
                 if len(captured_output) > MAX_BUILDER_OUTPUT_CHARS
                 else captured_output
             )

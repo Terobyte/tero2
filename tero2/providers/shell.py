@@ -30,7 +30,11 @@ class ShellProvider(BaseProvider):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await proc.communicate()
+        except Exception:
+            proc.terminate()
+            raise
         if proc.returncode != 0:
             err_msg = stderr.decode(errors="replace").strip()
             log.error("shell provider exited %d: %s", proc.returncode, err_msg)

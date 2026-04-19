@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -10,6 +11,8 @@ from enum import Enum
 from pathlib import Path
 
 from tero2.errors import StateTransitionError
+
+log = logging.getLogger(__name__)
 
 
 class Phase(str, Enum):
@@ -111,11 +114,13 @@ class AgentState:
     def from_json(cls, data: str) -> AgentState:
         try:
             d = json.loads(data)
-        except (json.JSONDecodeError, ValueError, TypeError):
-            return cls()
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            raise ValueError(f"AgentState.from_json: corrupted data — {e}") from e
 
         if not isinstance(d, dict):
-            return cls()
+            raise ValueError(
+                f"AgentState.from_json: expected dict, got {type(d).__name__}"
+            )
 
         # Fuzzy-correct typo'd field names before enum conversion.
         # Example: "soraphase" → "sora_phase" (underscore stripped comparison).
@@ -143,14 +148,15 @@ class AgentState:
 
         try:
             return cls(**{k: v for k, v in d.items() if k in known})
-        except (TypeError, KeyError, AttributeError):
-            return cls()
+        except (TypeError, KeyError, AttributeError) as e:
+            raise ValueError(f"AgentState.from_json: invalid fields — {e}") from e
 
     @classmethod
     def from_file(cls, path: Path) -> AgentState:
         try:
             return cls.from_json(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError):
+            log.warning("AgentState.from_file: cannot read %s — starting fresh", path)
             return cls()
 
     def save(self, path: Path) -> None:

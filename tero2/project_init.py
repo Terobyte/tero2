@@ -42,6 +42,8 @@ def init_project(
         FileExistsError: If project directory already exists.
     """
     safe_name = _sanitize_name(project_name)
+    if not safe_name:
+        raise ValueError(f"Project name {project_name!r} produces an empty directory name after sanitization")
     projects_dir = Path(config.projects_dir).expanduser().resolve()
     project_path = projects_dir / safe_name
 
@@ -83,7 +85,8 @@ def _sanitize_name(name: str) -> str:
     # Replace non-alphanumeric chars (except spaces and hyphens) with nothing
     cleaned = re.sub(r"[^\w\s-]", "", name)
     # Replace whitespace with hyphens, lowercase
-    return re.sub(r"[-\s]+", "-", cleaned).strip("-").lower()
+    result = re.sub(r"[-\s]+", "-", cleaned).strip("-").lower()
+    return result or "project"
 
 
 def _extract_project_name(plan: str) -> str:

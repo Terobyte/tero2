@@ -7,6 +7,7 @@ from typing import ClassVar
 
 from textual.app import ComposeResult
 from textual.binding import Binding
+from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Input, Label, ListItem, ListView, Static
 
@@ -58,7 +59,7 @@ class ProjectPickScreen(ModalScreen[Path | None]):
         if p.is_dir():
             self.dismiss(p)
         else:
-            self.notify("Папка не найдена — удалить из истории? (d)", severity="warning")
+            self.notify("Папка не найдена", severity="warning")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         p = Path(event.value).expanduser().resolve()
@@ -68,7 +69,10 @@ class ProjectPickScreen(ModalScreen[Path | None]):
             self.notify("Папка не найдена", severity="error")
 
     def action_manual_input(self) -> None:
-        self.mount(Input(placeholder="Путь к проекту…", id="path-input"))
+        try:
+            self.query_one("#path-input")
+        except NoMatches:
+            self.mount(Input(placeholder="Путь к проекту…", id="path-input"))
 
     def action_cancel(self) -> None:
         self.dismiss(None)

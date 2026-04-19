@@ -162,10 +162,10 @@ class EventDispatcher:
 
                 if event.priority:
                     # Discard the oldest non-priority item to free a slot.
+                    # del + append is a net-zero swap: _unfinished_tasks unchanged.
                     for i, existing in enumerate(inner):
                         if not existing.priority:
                             del inner[i]
-                            q._unfinished_tasks -= 1  # type: ignore[attr-defined]
                             break
                     else:
                         # Every slot holds a priority event — intentional one-item
@@ -181,15 +181,11 @@ class EventDispatcher:
                     for i, existing in enumerate(inner):
                         if not existing.priority:
                             del inner[i]
-                            q._unfinished_tasks -= 1  # type: ignore[attr-defined]
                             dropped = True
                             break
                     if not dropped:
                         continue
 
-                # Enqueue the new event without going through put_nowait so that a
-                # prior one-item overflow (qsize == maxsize + 1) never triggers
-                # QueueFull: after popping one item the deque still has maxsize items
-                # and put_nowait would see full() == True and raise.
+                # Swap: append the new event in place of the deleted item.
+                # _unfinished_tasks is unchanged — one item in, one item out.
                 inner.append(event)
-                q._unfinished_tasks += 1  # type: ignore[attr-defined]

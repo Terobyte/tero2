@@ -39,10 +39,12 @@ class DiskLayer:
     def lock_path(self) -> Path:
         return self.sora_dir / "runtime" / "auto.lock"
 
-    def read_file(self, relative_path: str) -> str:
+    def read_file(self, relative_path: str) -> str | None:
         try:
             return (self.sora_dir / relative_path).read_text(encoding="utf-8")
-        except (OSError, FileNotFoundError):
+        except FileNotFoundError:
+            return None
+        except OSError:
             return ""
 
     def write_file(self, relative_path: str, content: str) -> None:
@@ -76,10 +78,10 @@ class DiskLayer:
             f.write(json.dumps(event) + "\n")
 
     def read_override(self) -> str:
-        return self.read_file("human/OVERRIDE.md")
+        return self.read_file("human/OVERRIDE.md") or ""
 
     def read_steer(self) -> str:
-        return self.read_file("human/STEER.md")
+        return self.read_file("human/STEER.md") or ""
 
     def clear_override(self) -> None:
         (self.sora_dir / "human" / "OVERRIDE.md").unlink(missing_ok=True)

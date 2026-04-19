@@ -98,7 +98,7 @@ async def test_switch_provider_command() -> None:
     assert not q.empty()
     cmd = q.get_nowait()
     assert cmd.kind == "switch_provider"
-    assert cmd.data == {"role": "scout", "provider": "opencode"}
+    assert cmd.data == {"role": "scout", "provider": "opencode", "model": ""}
     assert cmd.source == "tui"
 
 

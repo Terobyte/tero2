@@ -33,7 +33,10 @@ class PlanPickScreen(ModalScreen[Path | None]):
         super().__init__()
         self._project_path = project_path
         # Scan once; cache result. Index used in selection must match compose().
-        self._files: list[Path] = self._scan_md_files()
+        try:
+            self._files: list[Path] = self._scan_md_files()
+        except OSError:
+            self._files = []
 
     def _scan_md_files(self) -> list[Path]:
         files: list[Path] = []
@@ -41,12 +44,21 @@ class PlanPickScreen(ModalScreen[Path | None]):
             for p in self._project_path.rglob("*.md"):
                 if not p.is_file():
                     continue
-                if any(part in _SKIP for part in p.parts):
+                try:
+                    rel_parts = p.relative_to(self._project_path).parts
+                except ValueError:
+                    continue
+                if any(part in _SKIP for part in rel_parts):
                     continue
                 files.append(p)
         except PermissionError:
             pass
-        files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        def _mtime(p: Path) -> float:
+            try:
+                return p.stat().st_mtime
+            except OSError:
+                return 0.0
+        files.sort(key=_mtime, reverse=True)
         return files[:_MAX_PLANS]
 
     # ── compose ──────────────────────────────────────────────────────────────

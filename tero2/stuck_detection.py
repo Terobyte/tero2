@@ -90,12 +90,11 @@ def update_tool_hash(state: AgentState, tool_call: str) -> tuple[AgentState, boo
 
     Returns:
         (updated_state, is_repeat) — is_repeat is True if hash matches previous.
+        The original state is NOT mutated; a new state object is returned.
     """
+    from dataclasses import replace
     new_hash = compute_tool_hash(tool_call)
     is_repeat = new_hash == state.last_tool_hash
-    state.last_tool_hash = new_hash
-    if is_repeat:
-        state.tool_repeat_count += 1
-    else:
-        state.tool_repeat_count = 0
-    return state, is_repeat
+    new_count = state.tool_repeat_count + 1 if is_repeat else 0
+    new_state = replace(state, last_tool_hash=new_hash, tool_repeat_count=new_count)
+    return new_state, is_repeat

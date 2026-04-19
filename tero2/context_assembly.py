@@ -141,17 +141,17 @@ class ContextAssembler:
         # Determine which sections to include: process highest keep priority
         # first so higher-priority sections get first claim on the budget
         # and can evict lower-priority sections.
+        # O(n): accumulate token count incrementally instead of rebuilding
+        # the full candidate string on each iteration.
         included_indices: set[int] = set()
-        for idx, (_tag, _body, _pri) in sorted(enumerate(optional), key=lambda x: -x[1][2]):
-            parts = [mandatory_user]
-            for i, (t, b, _p) in enumerate(optional):
-                if i in included_indices or i == idx:
-                    parts.append(_section(t, b))
-            candidate = "\n\n".join(parts)
-            candidate_tokens = estimate_tokens(system_prompt + candidate)
+        running_tokens = estimate_tokens(system_prompt + mandatory_user)
+        for idx, (_tag, body, _pri) in sorted(enumerate(optional), key=lambda x: -x[1][2]):
+            section_tokens = estimate_tokens("\n\n" + _section(_tag, body))
+            candidate_tokens = running_tokens + section_tokens
             c_status = _check_budget(candidate_tokens, budget, cfg)
             if c_status in (BudgetState.OK, BudgetState.WARNING):
                 included_indices.add(idx)
+                running_tokens = candidate_tokens
 
         # Build final prompt in canonical display order
         current = mandatory_user

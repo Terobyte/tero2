@@ -24,13 +24,15 @@ class TestFromFileCorruption:
     def test_malformed_json(self, tmp_path: Path) -> None:
         p = tmp_path / "state.json"
         _write(p, b"{bad json!!!")
-        assert AgentState.from_file(p) == AgentState()
+        with pytest.raises(ValueError, match="corrupted data"):
+            AgentState.from_file(p)
 
     @pytest.mark.parametrize("payload", [b"[]", b"[1, 2, 3]", b'"x"', b"123", b"null", b"true"])
     def test_wrong_top_level_type(self, tmp_path: Path, payload: bytes) -> None:
         p = tmp_path / "state.json"
         _write(p, payload)
-        assert AgentState.from_file(p) == AgentState()
+        with pytest.raises(ValueError, match="expected dict"):
+            AgentState.from_file(p)
 
     def test_valid_state_round_trips(self, tmp_path: Path) -> None:
         s = AgentState(phase=Phase.RUNNING, current_task="do stuff", steps_in_task=3)

@@ -94,10 +94,10 @@ class ArchitectPlayer(BasePlayer):
         # Callers may inject content directly (used in tests / phase handlers).
         # If not provided, read from disk with the standard fallback chain.
         roadmap: str = kwargs.get("roadmap", "") or self._read_roadmap(milestone_path)
-        strategy: str = kwargs.get("strategy", "") or self.disk.read_file("strategic/STRATEGY.md")
+        strategy: str = kwargs.get("strategy", "") or self.disk.read_file("strategic/STRATEGY.md") or ""
         context_map: str = kwargs.get("context_map", "") or self.disk.read_file(
             f"{milestone_path}/CONTEXT_MAP.md"
-        )
+        ) or ""
 
         prompt = self._build_prompt(persona_prompt, roadmap, strategy, context_map)
         try:
@@ -133,7 +133,7 @@ class ArchitectPlayer(BasePlayer):
         plan = self.disk.read_file(f"{milestone_path}/PLAN.md")
         if plan:
             return plan
-        return self.disk.read_file(f"{milestone_path}/ROADMAP.md")
+        return self.disk.read_file(f"{milestone_path}/ROADMAP.md") or ""
 
     @staticmethod
     def _build_prompt(

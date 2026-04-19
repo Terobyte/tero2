@@ -182,17 +182,31 @@ class CLIProvider(BaseProvider):
                     f"Broken pipe writing to {self._name}: "
                     f"process exited before stdin was sent"
                 ) from exc
-            proc.stdin.close()
-            await proc.stdin.wait_closed()
+            finally:
+                proc.stdin.close()
+                await proc.stdin.wait_closed()
 
         assert proc.stdout is not None
         stderr_task = asyncio.create_task(proc.stderr.read()) if proc.stderr else None
 
         lines: list[str] = []
-        async for line in proc.stdout:
-            lines.append(line.decode(errors="replace"))
+        try:
+            async for line in proc.stdout:
+                lines.append(line.decode(errors="replace"))
+        except Exception:
+            if stderr_task is not None:
+                stderr_task.cancel()
+                from contextlib import suppress
+                with suppress(asyncio.CancelledError):
+                    await stderr_task
+            raise
 
-        stderr_bytes = await stderr_task if stderr_task else b""
+        stderr_bytes = b""
+        if stderr_task is not None:
+            try:
+                stderr_bytes = stderr_task.result() if stderr_task.done() else await stderr_task
+            except (asyncio.CancelledError, Exception):
+                stderr_bytes = b""
         await proc.wait()
 
         if proc.returncode != 0:

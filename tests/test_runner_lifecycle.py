@@ -269,6 +269,69 @@ class TestOptionalPlanFile:
 
         assert disk.read_state().phase == Phase.COMPLETED
 
+    async def test_switch_provider_command_updates_both_provider_and_model(
+        self, tmp_path: Path
+    ) -> None:
+        """_drain_commands with switch_provider must update role.provider AND role.model."""
+        import asyncio
+        from tero2.events import Command
+
+        project, plan, config, disk = _make_project(tmp_path)
+        # executor role starts with provider="fake", no model set
+        config.roles["executor"].model = "old-model"
+
+        runner = Runner(project, plan, config=config)
+        runner._command_queue = asyncio.Queue()  # type: ignore[assignment]
+
+        await runner._command_queue.put(
+            Command(
+                kind="switch_provider",
+                data={"role": "executor", "provider": "claude", "model": "claude-opus-4-5"},
+                source="tui",
+            )
+        )
+
+        state = disk.read_state()
+        await runner._drain_commands(state)
+
+        assert config.roles["executor"].provider == "claude", (
+            "provider not updated by switch_provider command"
+        )
+        assert config.roles["executor"].model == "claude-opus-4-5", (
+            "model not updated by switch_provider command"
+        )
+
+    async def test_switch_provider_empty_model_clears_existing(
+        self, tmp_path: Path
+    ) -> None:
+        """switch_provider with model="" must clear the stale model (e.g. switching to codex default)."""
+        import asyncio
+        from tero2.events import Command
+
+        project, plan, config, disk = _make_project(tmp_path)
+        config.roles["executor"].model = "claude-sonnet-4-5"
+
+        runner = Runner(project, plan, config=config)
+        runner._command_queue = asyncio.Queue()  # type: ignore[assignment]
+
+        await runner._command_queue.put(
+            Command(
+                kind="switch_provider",
+                data={"role": "executor", "provider": "codex", "model": ""},
+                source="tui",
+            )
+        )
+
+        state = disk.read_state()
+        await runner._drain_commands(state)
+
+        assert config.roles["executor"].provider == "codex", (
+            "provider not updated to codex"
+        )
+        assert config.roles["executor"].model == "", (
+            "stale model was not cleared when model='' was explicitly sent"
+        )
+
     async def test_running_checkpoint_no_plan_file_in_state_returns(self, tmp_path: Path) -> None:
         """RUNNING checkpoint with empty plan_file + plan_file=None → returns without executing."""
         project, _, config, disk = _make_project(tmp_path)

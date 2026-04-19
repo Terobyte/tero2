@@ -201,7 +201,6 @@ class TelegramInputBot:
             if self._paused:
                 # Put the plan back and wait
                 await self._plan_queue.put((project_name, plan_content))
-                self._plan_queue.task_done()
                 await asyncio.sleep(1.0)
                 continue
 
@@ -226,7 +225,8 @@ class TelegramInputBot:
                     NotifyLevel.ERROR,
                 )
             finally:
-                self._plan_queue.task_done()
+                if not self._paused:
+                    self._plan_queue.task_done()
 
     async def _launch_runner(self, project_path: Path) -> None:
         """Launch tero2 runner as a subprocess for the given project.

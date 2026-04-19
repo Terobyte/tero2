@@ -119,13 +119,13 @@ class CoachPlayer(BasePlayer):
         metrics_str = json.dumps(metrics_raw, indent=2) if metrics_raw else ""
 
         return {
-            "roadmap": self.disk.read_file(f"{milestone_path}/ROADMAP.md"),
-            "context_map": self.disk.read_file(f"{milestone_path}/CONTEXT_MAP.md"),
+            "roadmap": self.disk.read_file(f"{milestone_path}/ROADMAP.md") or "",
+            "context_map": self.disk.read_file(f"{milestone_path}/CONTEXT_MAP.md") or "",
             "task_summaries": "\n\n".join(summaries),
-            "decisions": self.disk.read_file("persistent/DECISIONS.md"),
-            "event_journal": self.disk.read_file("persistent/EVENT_JOURNAL.md"),
+            "decisions": self.disk.read_file("persistent/DECISIONS.md") or "",
+            "event_journal": self.disk.read_file("persistent/EVENT_JOURNAL.md") or "",
             "metrics": metrics_str,
-            "context_hints": self.disk.read_file("strategic/CONTEXT_HINTS.md"),
+            "context_hints": self.disk.read_file("strategic/CONTEXT_HINTS.md") or "",
             "steer": self.disk.read_steer(),
         }
 
