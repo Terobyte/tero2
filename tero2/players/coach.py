@@ -109,11 +109,28 @@ class CoachPlayer(BasePlayer):
             human/STEER.md              (if exists)
         """
         summaries: list[str] = []
-        for i in range(1, _MAX_TASKS + 1):
-            tid = f"T{i:02d}"
-            content = self.disk.read_file(f"{milestone_path}/{slice_id}/{tid}-SUMMARY.md")
-            if content:
-                summaries.append(f"### {tid}\n{content}")
+        total_size = 0
+        _SIZE_CAP = 50_000
+
+        milestone_abs = self.disk.sora_dir / milestone_path
+        slice_dirs = sorted(
+            d.name for d in milestone_abs.iterdir()
+            if d.is_dir() and re.match(r"S\d+", d.name)
+        ) if milestone_abs.is_dir() else []
+
+        for sid in slice_dirs:
+            for i in range(1, _MAX_TASKS + 1):
+                tid = f"T{i:02d}"
+                content = self.disk.read_file(f"{milestone_path}/{sid}/{tid}-SUMMARY.md")
+                if content:
+                    entry = f"### {sid}/{tid}\n{content}"
+                    if total_size + len(entry) > _SIZE_CAP:
+                        break
+                    summaries.append(entry)
+                    total_size += len(entry)
+            else:
+                continue
+            break  # inner break propagates to outer loop
 
         metrics_raw = self.disk.read_metrics()
         metrics_str = json.dumps(metrics_raw, indent=2) if metrics_raw else ""
