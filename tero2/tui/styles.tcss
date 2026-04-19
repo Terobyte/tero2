@@ -48,3 +48,65 @@ PlanPickScreen .path-label {
 ProjectPickScreen .entry-warning {
     color: $warning;
 }
+
+/* ModelPickScreen */
+ModelPickScreen {
+    background: $surface;
+    border: thick $primary;
+    height: auto;
+    max-height: 80%;
+    width: 80%;
+    margin: 2 4;
+}
+
+ModelPickScreen ListView {
+    height: auto;
+    max-height: 25;
+}
+
+ModelPickScreen .model-label {
+    color: $text;
+}
+
+ModelPickScreen .model-id {
+    color: $text-muted;
+}
+
+.provider-disabled {
+    color: $text-muted;
+    text-style: dim;
+}
+
+/* SettingsScreen */
+SettingsScreen {
+    background: $surface;
+    border: thick $primary;
+    height: auto;
+    max-height: 90%;
+    width: 85%;
+    margin: 1 2;
+}
+
+SettingsScreen .field-label {
+    color: $text-muted;
+    margin-top: 1;
+}
+
+/* ProvidersPickScreen */
+ProvidersPickScreen {
+    background: $surface;
+    border: thick $primary;
+    height: auto;
+    max-height: 80%;
+    width: 80%;
+    margin: 2 4;
+}
+
+ProvidersPickScreen .role-name {
+    color: $text;
+    width: 15;
+}
+
+ProvidersPickScreen .provider-model {
+    color: $text-muted;
+}
