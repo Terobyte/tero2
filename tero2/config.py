@@ -68,6 +68,7 @@ class ReflexionConfig:
 
 @dataclass
 class TelegramConfig:
+    enabled: bool = False   # explicit opt-in; legacy fallback: non-empty bot_token -> True
     bot_token: str = ""
     chat_id: str = ""
     heartbeat_interval_s: int = DEFAULT_HEARTBEAT_INTERVAL_S
@@ -167,7 +168,12 @@ def _parse_config(raw: dict) -> Config:
 
     tg = raw.get("telegram", {})
     if tg:
+        # Legacy fallback: if 'enabled' absent but bot_token present, treat as enabled
+        tg_enabled = tg.get("enabled")
+        if tg_enabled is None:
+            tg_enabled = bool(tg.get("bot_token", ""))
         cfg.telegram = TelegramConfig(
+            enabled=bool(tg_enabled),
             bot_token=tg.get("bot_token", ""),
             chat_id=tg.get("chat_id", ""),
             heartbeat_interval_s=tg.get("heartbeat_interval_s", DEFAULT_HEARTBEAT_INTERVAL_S),
