@@ -105,6 +105,8 @@ def run_startup_wizard() -> tuple | None:
     result_holder = []
 
     class _WizardApp(App):
+        CSS_PATH = Path(__file__).parent / "tui" / "styles.tcss"
+
         def on_mount(self) -> None:
             self.push_screen(StartupWizard(), self._done)
 
@@ -138,6 +140,12 @@ def cmd_go(args: argparse.Namespace) -> None:
         if result is None:
             sys.exit(0)
         project_path, plan_file = result
+        if not project_path.is_dir():
+            print(f"error: {project_path} is not a directory")
+            sys.exit(1)
+        if plan_file is not None and not plan_file.is_file():
+            print(f"error: plan file not found: {plan_file}")
+            sys.exit(1)
     else:
         project_path = Path(args.project_path).expanduser().resolve()
 
@@ -283,7 +291,10 @@ def cmd_telegram(args: argparse.Namespace) -> None:
 
     project_path = Path(args.project or ".").expanduser().resolve()
     config = load_config(project_path)
-    if not config.telegram or not config.telegram.bot_token:
+    if not config.telegram or not config.telegram.enabled:
+        print("error: telegram disabled — enable via ~/.tero2/config.toml or SettingsScreen [o]")
+        sys.exit(1)
+    if not config.telegram.bot_token:
         print("error: telegram bot_token not configured")
         sys.exit(1)
     if not config.telegram.allowed_chat_ids:
