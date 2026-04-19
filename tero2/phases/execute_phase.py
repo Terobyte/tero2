@@ -368,7 +368,6 @@ async def run_execute(
                 builder_output=truncated,
                 verifier_feedback=verify_result.captured_output,
                 failed_tests=verify_result.failed_tests,
-                must_haves_failed=verify_result.must_haves_failed,
             )
 
         # ── Post-task bookkeeping ──────────────────────────────────────────

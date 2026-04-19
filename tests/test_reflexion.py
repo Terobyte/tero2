@@ -24,7 +24,6 @@ class TestReflexionContext:
                     builder_output="wrote auth module",
                     verifier_feedback="test_token_expiry FAILED",
                     failed_tests=["test_token_expiry"],
-                    must_haves_failed=["tokens expire after 1h"],
                 )
             ]
         )
@@ -34,7 +33,6 @@ class TestReflexionContext:
         assert "wrote auth module" in prompt
         assert "test_token_expiry FAILED" in prompt
         assert "test_token_expiry" in prompt
-        assert "tokens expire after 1h" in prompt
 
     def test_multiple_attempts(self):
         ctx = ReflexionContext(
@@ -44,14 +42,12 @@ class TestReflexionContext:
                     builder_output="try 1",
                     verifier_feedback="fail 1",
                     failed_tests=[],
-                    must_haves_failed=[],
                 ),
                 ReflexionAttempt(
                     attempt_number=2,
                     builder_output="try 2",
                     verifier_feedback="fail 2",
                     failed_tests=["test_a"],
-                    must_haves_failed=["req_a"],
                 ),
             ]
         )
@@ -80,7 +76,6 @@ class TestAddAttempt:
                     builder_output="first",
                     verifier_feedback="bad",
                     failed_tests=[],
-                    must_haves_failed=[],
                 )
             ]
         )
@@ -96,10 +91,8 @@ class TestAddAttempt:
             builder_output="output",
             verifier_feedback="feedback",
             failed_tests=["test_x", "test_y"],
-            must_haves_failed=["must_1"],
         )
         assert result.attempts[0].failed_tests == ["test_x", "test_y"]
-        assert result.attempts[0].must_haves_failed == ["must_1"]
 
 
 class TestBuildReflexionContext:
@@ -111,7 +104,6 @@ class TestBuildReflexionContext:
                 builder_output=long_output,
                 verifier_feedback="fail",
                 failed_tests=[],
-                must_haves_failed=[],
             )
         ]
         ctx = build_reflexion_context(attempts)
@@ -125,7 +117,6 @@ class TestBuildReflexionContext:
                 builder_output="short",
                 verifier_feedback="fail",
                 failed_tests=[],
-                must_haves_failed=[],
             )
         ]
         ctx = build_reflexion_context(attempts)

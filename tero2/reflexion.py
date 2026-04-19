@@ -21,7 +21,6 @@ class ReflexionAttempt:
     builder_output: str  # what the builder did (truncated)
     verifier_feedback: str  # why it failed
     failed_tests: list[str]  # specific test names
-    must_haves_failed: list[str]  # which must-haves didn't pass
 
 
 @dataclass
@@ -52,8 +51,6 @@ class ReflexionContext:
             lines.append(f"**What failed:** {attempt.verifier_feedback}")
             if attempt.failed_tests:
                 lines.append(f"**Failed tests:** {', '.join(attempt.failed_tests)}")
-            if attempt.must_haves_failed:
-                lines.append(f"**Must-haves not met:** {'; '.join(attempt.must_haves_failed)}")
             lines.append("")
 
         return "\n".join(lines)
@@ -81,7 +78,6 @@ def build_reflexion_context(
                 builder_output=output,
                 verifier_feedback=a.verifier_feedback,
                 failed_tests=a.failed_tests,
-                must_haves_failed=a.must_haves_failed,
             )
         )
     return ReflexionContext(attempts=truncated)
@@ -92,7 +88,6 @@ def add_attempt(
     builder_output: str,
     verifier_feedback: str,
     failed_tests: list[str] | None = None,
-    must_haves_failed: list[str] | None = None,
 ) -> ReflexionContext:
     """Add a failed attempt to the reflexion context.
 
@@ -101,7 +96,6 @@ def add_attempt(
         builder_output: Raw output from the executor's failed run.
         verifier_feedback: Description of why it failed.
         failed_tests: Specific test names that failed.
-        must_haves_failed: Must-have conditions that weren't met.
 
     Returns:
         Updated ReflexionContext with the new attempt appended.
@@ -111,7 +105,6 @@ def add_attempt(
         builder_output=builder_output,
         verifier_feedback=verifier_feedback,
         failed_tests=failed_tests or [],
-        must_haves_failed=must_haves_failed or [],
     )
     context.attempts.append(attempt)
     return context

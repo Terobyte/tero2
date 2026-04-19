@@ -64,7 +64,6 @@ class TestBug20UTF8Truncation:
             builder_output=long_output,
             verifier_feedback="",
             failed_tests=[],
-            must_haves_failed=[],
         )
 
         # Simulate the truncation logic from reflexion.py line 76-77
@@ -83,7 +82,6 @@ class TestBug20UTF8Truncation:
             builder_output=cjk,
             verifier_feedback="",
             failed_tests=[],
-            must_haves_failed=[],
         )
 
         output = attempt.builder_output

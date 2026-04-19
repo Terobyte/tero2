@@ -230,7 +230,9 @@ class TestB5VerifierConfigDriven:
         assert not result.success
 
     @pytest.mark.asyncio
-    async def test_anomaly_keyword_in_output_gives_anomaly_verdict(self, tmp_path: Path) -> None:
+    async def test_anomaly_keyword_in_output_with_rc0_gives_pass(self, tmp_path: Path) -> None:
+        # After R1 fix: the word "ANOMALY" in output no longer triggers ANOMALY verdict.
+        # rc=0 means the command succeeded — verdict is PASS regardless of output text.
         disk = _make_disk(tmp_path)
         chain = _fake_chain()
         player = VerifierPlayer(chain, disk, working_dir=str(tmp_path))
@@ -238,6 +240,25 @@ class TestB5VerifierConfigDriven:
         with patch(
             "tero2.players.verifier._run_command",
             return_value=(0, "tests passed but ANOMALY detected", ""),
+        ):
+            result = await player.run(
+                builder_output="",
+                task_id="T01",
+                verify_commands=["swift test"],
+            )
+
+        assert result.verdict == Verdict.PASS
+
+    @pytest.mark.asyncio
+    async def test_negative_rc_gives_anomaly_verdict(self, tmp_path: Path) -> None:
+        # ANOMALY is triggered by negative rc (timeout or command not found).
+        disk = _make_disk(tmp_path)
+        chain = _fake_chain()
+        player = VerifierPlayer(chain, disk, working_dir=str(tmp_path))
+
+        with patch(
+            "tero2.players.verifier._run_command",
+            return_value=(-1, "", "command timed out: swift test"),
         ):
             result = await player.run(
                 builder_output="",

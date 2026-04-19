@@ -36,13 +36,10 @@ class VerifierResult(PlayerResult):
     ruff_output: str = ""
     pytest_output: str = ""
     failed_tests: list[str] = None  # type: ignore[assignment]
-    must_haves_failed: list[str] = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         if self.failed_tests is None:
             self.failed_tests = []
-        if self.must_haves_failed is None:
-            self.must_haves_failed = []
 
 
 def _run_subprocess(cmd: list[str], cwd: str) -> tuple[int, str, str]:
@@ -128,7 +125,6 @@ class VerifierPlayer(BasePlayer):
             verdict = _parse_verdict(combined, all_rc)
             report = verdict + "\n" + combined
             failed_tests = _extract_list(combined, "FAILED")
-            must_haves_failed = _extract_list(builder_output, "must-haves")
 
             # Preserve ruff/pytest fields when using default Python commands.
             ruff_output = all_output[0] if len(all_output) > 0 else ""
@@ -141,7 +137,6 @@ class VerifierPlayer(BasePlayer):
                 ruff_output=ruff_output,
                 pytest_output=pytest_output,
                 failed_tests=failed_tests,
-                must_haves_failed=must_haves_failed,
             )
         except Exception as exc:
             log.error("verifier failed for %s: %s", task_id, exc)
@@ -153,7 +148,7 @@ class VerifierPlayer(BasePlayer):
 
 
 def _parse_verdict(output: str, return_codes: list[int]) -> str:
-    if re.search(r"\bANOMALY\b", output, re.IGNORECASE):
+    if any(rc < 0 for rc in return_codes):
         return Verdict.ANOMALY
     if any(rc != 0 for rc in return_codes):
         return Verdict.FAIL

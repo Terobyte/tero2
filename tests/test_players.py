@@ -470,10 +470,17 @@ class TestVerifierVerdictParsing:
 
         assert _parse_verdict("test failed", [0, 1]) == Verdict.FAIL
 
-    def test_anomaly_detected_first(self):
+    def test_anomaly_on_negative_rc(self):
         from tero2.players.verifier import Verdict, _parse_verdict
 
-        assert _parse_verdict("ANOMALY detected", [1, 1]) == Verdict.ANOMALY
+        # ANOMALY is triggered by negative rc (timeout/not-found), not the word in output
+        assert _parse_verdict("command timed out", [-1]) == Verdict.ANOMALY
+
+    def test_anomaly_word_in_output_with_positive_rc_is_fail(self):
+        from tero2.players.verifier import Verdict, _parse_verdict
+
+        # The word "ANOMALY" in output with non-zero positive rc is FAIL, not ANOMALY
+        assert _parse_verdict("ANOMALY detected", [1, 1]) == Verdict.FAIL
 
     def test_fail_does_not_match_pass_substring(self):
         from tero2.players.verifier import Verdict, _parse_verdict

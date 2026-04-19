@@ -109,11 +109,18 @@ class TestBug63ParseVerdictAnomalyFalsePositive:
         output = "tests/test_anomaly_utils.py::test_ok PASSED"
         assert _parse_verdict(output, [0, 0]) == Verdict.PASS
 
-    def test_real_anomaly_keyword_returns_anomaly(self):
+    def test_anomaly_word_with_rc0_returns_pass_not_anomaly(self):
+        # After R1 fix: the word "ANOMALY" in output does NOT trigger ANOMALY verdict.
+        # ANOMALY is only triggered by negative rc (timeout or command not found).
         from tero2.players.verifier import _parse_verdict, Verdict
 
         output = "ANOMALY detected in output"
-        assert _parse_verdict(output, [0, 0]) == Verdict.ANOMALY
+        assert _parse_verdict(output, [0, 0]) == Verdict.PASS
+
+    def test_negative_rc_returns_anomaly(self):
+        from tero2.players.verifier import _parse_verdict, Verdict
+
+        assert _parse_verdict("command timed out", [-1]) == Verdict.ANOMALY
 
 
 # ── Bug 69: BrokenPipeError on stdin write ──────────────────────────────
