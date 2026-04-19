@@ -13,6 +13,7 @@ from textual.worker import WorkerState
 from tero2.events import Command, EventDispatcher
 from tero2.runner import Runner
 from tero2.state import SoraPhase
+from tero2.tui.commands import Tero2CommandProvider
 from tero2.tui.screens.role_swap import RoleSwapScreen, SwitchProviderMessage
 from tero2.tui.screens.steer import SteerMessage, SteerScreen
 from tero2.tui.widgets.stuck_hint import StuckHintWidget
@@ -26,18 +27,22 @@ class DashboardApp(App):
 
     CSS_PATH = "styles.tcss"
 
+    COMMANDS: ClassVar[set] = {Tero2CommandProvider}
+
     BINDINGS: ClassVar[list] = [
         ("r", "roles", "Роли"),
-        ("s", "steer", "Стир"),
+        ("s", "steer", "Указание"),
         ("p", "pause", "Пауза"),
         ("q", "quit", "Выход"),
         ("k", "skip", "Пропустить"),
-        ("l", "change_plan", "Изменить план"),
-        ("1", "stuck_option_1", ""),
-        ("2", "stuck_option_2", ""),
-        ("3", "stuck_option_3", ""),
-        ("4", "stuck_option_4", ""),
-        ("5", "stuck_option_5", ""),
+        ("l", "change_plan", "Смена плана"),
+        ("n", "new_project", "Новый"),
+        ("o", "settings", "Настройки"),
+        ("1", "stuck_option_1", "1 retry"),
+        ("2", "stuck_option_2", "2 switch"),
+        ("3", "stuck_option_3", "3 skip"),
+        ("4", "stuck_option_4", "4 escalate"),
+        ("5", "stuck_option_5", "5 manual"),
     ]
 
     def __init__(
@@ -175,9 +180,8 @@ class DashboardApp(App):
         log_view.push_message("Смена проекта — будет в M2.", style="yellow")
 
     def action_settings(self) -> None:
-        # M3: open SettingsScreen
-        log_view = self.query_one("#log-view", LogView)
-        log_view.push_message("Настройки — будут в M3.", style="yellow")
+        from tero2.tui.screens.settings import SettingsScreen
+        self.push_screen(SettingsScreen())
 
     # ── action guard ──────────────────────────────────────────────────────────
 
@@ -236,7 +240,7 @@ class DashboardApp(App):
         self._command_queue.put_nowait(
             Command(
                 "switch_provider",
-                data={"role": msg.role, "provider": msg.provider},
+                data={"role": msg.role, "provider": msg.provider, "model": msg.model},
                 source="tui",
             )
         )
