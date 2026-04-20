@@ -115,7 +115,7 @@ class CoachPlayer(BasePlayer):
         milestone_abs = self.disk.sora_dir / milestone_path
         slice_dirs = sorted(
             d.name for d in milestone_abs.iterdir()
-            if d.is_dir() and re.match(r"S\d+", d.name)
+            if d.is_dir() and re.fullmatch(r"S\d+", d.name)
         ) if milestone_abs.is_dir() else []
 
         for sid in slice_dirs:

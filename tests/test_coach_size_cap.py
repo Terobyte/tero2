@@ -27,4 +27,4 @@ def test_summary_size_cap_enforced(tmp_path: Path) -> None:
     player = CoachPlayer(chain, disk)
     ctx = player._gather_context("milestones/M001", "S03")
 
-    assert len(ctx["task_summaries"]) <= 55_000  # allow small overhead from headers
+    assert len(ctx["task_summaries"]) <= 50_200  # 50KB cap + minimal separator overhead
