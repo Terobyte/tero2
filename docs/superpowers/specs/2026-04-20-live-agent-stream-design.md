@@ -8,9 +8,23 @@
 
 ## Prerequisites / Baseline
 
-Применяется к текущему `main` HEAD (commit `543bbfd` на момент написания). Все ссылки на файлы (`tero2/events.py`, `tero2/providers/cli.py`, `tero2/tui/app.py`, `tero2/players/base.py`, и т.д.) валидны на `main`.
+Применяется к текущему `main` HEAD на 2026-04-20 (спек сам коммитится сверху, поэтому "baseline" = commit **до** этого спека). Все ссылки на файлы (`tero2/events.py`, `tero2/providers/cli.py`, `tero2/tui/app.py`, `tero2/players/base.py`, `tero2/phases/context.py`, `tero2/phases/*_phase.py`) валидны на этом baseline.
 
-Поверх `main` уже есть неcommit-нутые правки (см. `git status` — 20+ файлов M), но спек пишется **от main**. Если конфликты возникнут при реализации — разрешаются в пользу спеки.
+Поверх `main` у пользователя уже есть неcommit-нутые правки (см. `git status` — 20+ файлов M), но спек пишется **от main**. Если конфликты возникнут при реализации — разрешаются в пользу спеки.
+
+**Верифицированные структуры кода, на которые опирается спек** (проверены при ревью):
+- `RunnerContext` (`tero2/phases/context.py:60`) — единый shared state для всех phase handlers; содержит `config`, `disk`, `dispatcher`, etc.
+- `RunnerContext.build_chain(role_name)` (`tero2/phases/context.py:94`) — конструктор `ProviderChain` на основе `config.roles[role_name]`. **Это точка wiring'а для `stream_bus`.**
+- `RunnerContext.run_agent(chain, prompt, role=...)` (`tero2/phases/context.py:129`) — legacy-путь для `executor` роли, использует `chain.run_prompt(...)` напрямую. **Тоже нуждается в stream-aware рефакторе.**
+- Players инстанцируются **внутри phase handlers**, не централизованно. Текущие точки:
+  - `phases/architect_phase.py:56` — `ArchitectPlayer(chain, ctx.disk, working_dir=...)`
+  - `phases/scout_phase.py:57` — `ScoutPlayer(chain, ctx.disk, working_dir=...)`
+  - `phases/coach_phase.py:54` — `CoachPlayer(chain, ctx.disk, working_dir=...)`
+  - `phases/harden_phase.py:66` — `ReviewerPlayer(chain, ctx.disk)`
+  - `phases/execute_phase.py:266` — `BuilderPlayer(chain, ctx.disk, working_dir=...)`
+  - `phases/execute_phase.py:306` — `VerifierPlayer(chain, ctx.disk, working_dir=...)`
+- Все 6 player-подклассов имеют identical `__init__(chain, disk, *, working_dir="")` — кросс-изменение конструктора делается механически в 6 файлах.
+- `ProviderChain.providers` — публичное имя списка (`chain.py:59`), **не** `_providers`.
 
 ---
 
@@ -137,12 +151,23 @@ tero2/
 │       ├── codex.py                [NEW]
 │       ├── opencode.py             [NEW]
 │       ├── kilo.py                 [NEW]
-│       └── zai.py                  [NEW] Anthropic API format
+│       └── zai.py                  [NEW] Anthropic SDK streaming format
 ├── players/
-│   ├── base.py                     [MOD] _run_prompt stream-aware
-│   ├── architect.py, scout.py, builder.py, coach.py, reviewer.py, verifier.py
-│   │                               (без изменений — используют BasePlayer)
-├── runner.py                       [MOD] создаёт StreamBus, пробрасывает в players
+│   ├── base.py                     [MOD] _run_prompt stream-aware, +stream_bus kwarg
+│   ├── architect.py                [MOD] __init__ кросс-проброс stream_bus kwarg
+│   ├── scout.py                    [MOD]     "
+│   ├── builder.py                  [MOD]     "
+│   ├── coach.py                    [MOD]     "
+│   ├── verifier.py                 [MOD]     "
+│   └── reviewer.py                 [MOD]     "
+├── phases/
+│   ├── context.py                  [MOD] RunnerContext.stream_bus + run_agent streaming
+│   ├── architect_phase.py          [MOD] передать stream_bus в ArchitectPlayer
+│   ├── scout_phase.py              [MOD] передать stream_bus в ScoutPlayer
+│   ├── coach_phase.py              [MOD] передать stream_bus в CoachPlayer
+│   ├── harden_phase.py             [MOD] передать stream_bus в ReviewerPlayer
+│   └── execute_phase.py            [MOD] передать stream_bus в Builder + Verifier
+├── runner.py                       [MOD] создаёт StreamBus, кладёт в RunnerContext
 ├── cli.py                          [MOD] wires Runner → DashboardApp (передать bus)
 └── tui/
     ├── app.py                      [MOD] new compose + hotkeys + pin/auto-switch
@@ -243,6 +268,10 @@ class StreamBus:
             pass
 
     def publish(self, event: StreamEvent) -> None:
+        """Publish event to all subscribers. Must be called from the asyncio
+        event-loop thread (uses put_nowait on asyncio.Queue). In tero2 this
+        is always the case: publish sites are inside async functions
+        (BasePlayer._run_prompt, RunnerContext.run_agent)."""
         for q in self._subscribers:
             if q.full():
                 try:
@@ -254,6 +283,8 @@ class StreamBus:
             except asyncio.QueueFull:
                 pass
 ```
+
+**Threading constraint:** `publish()` must be called from the asyncio event loop (same loop as the TUI's subscribers). `asyncio.Queue.put_nowait` from a non-loop thread is not safe. In tero2 all publish sites are inside async functions that run in the main loop — this is always satisfied. If future consumers need cross-thread publishing, use `loop.call_soon_threadsafe(q.put_nowait, event)`.
 
 ### Normalizer Contract
 
@@ -286,7 +317,7 @@ class StreamNormalizer(Protocol):
 - `codex.py` — codex `--json` format
 - `opencode.py` — opencode `--format json` format
 - `kilo.py` — kilo `--format json` format
-- `zai.py` — Anthropic API message format (already streaming in zai provider)
+- `zai.py` — Anthropic-SDK streaming format. **Note:** `ZaiProvider` использует `claude_agent_sdk.query` (не subprocess), поэтому буферизационная проблема из `CLIProvider` его не касается — zai уже стримит. Normalizer для zai адаптирует SDK-output к общей `StreamEvent` структуре.
 
 Dispatcher:
 
@@ -348,38 +379,49 @@ yield {"type":"turn_end","text":""}
 
 ### `tero2/providers/chain.py` — retry policy + current_provider_name
 
-1. Add `@property current_provider_name(self) -> str: return self._providers[self._current_provider_index].display_name`
+1. Add `@property current_provider_name(self) -> str: return self.providers[self._current_provider_index].display_name` — note public `self.providers` (not `_providers`).
 
-2. Retry logic:
-    - Before first yield: keep current buffered behavior (collect → check for stream-level errors → yield all). Allows retry on early errors.
-    - After first yield: pass-through. If error happens mid-stream, propagate without retry on same provider (failover to next provider in chain still works as before IF nothing yet yielded; otherwise hard fail).
+2. **Retry logic + error-detection semantics:**
+    - "Yielded" means: **the chain has `yield`-ed at least one message up to its caller**. A dict coming in from `provider.run()` is considered "yielded" only after the chain's own `yield` statement has passed it along. Before that, the chain can inspect it and treat `{"type":"error",...}` as a retryable signal.
+    - Failover across providers (next-in-chain on `_is_recoverable_error`) works **only if nothing has been yielded on the current provider**. Once a provider has yielded a message, subsequent errors on that provider are hard fails with no retry and no failover.
+    - Rate-limit / stream-level error detection happens on the **first** message only: if the first dict from `provider.run()` is `{"type":"error",...}`, raise `ProviderError` before yielding. All subsequent dicts pass through unchecked.
 
 Implementation sketch:
 ```python
 async def run(self, **kwargs):
-    for idx, provider in enumerate(self._providers):
-        if not cb.is_available: continue
+    for idx, provider in enumerate(self.providers):
+        cb = self.cb_registry.get(provider.display_name)
+        if not cb.is_available:
+            continue
         self._current_provider_index = idx
 
         for attempt in range(self._rate_limit_max_retries + 1):
-            # backoff sleep
+            # backoff sleep per existing logic
             yielded_anything = False
             try:
                 async for msg in provider.run(**kwargs):
-                    # Check for stream-level error ONLY if nothing yielded yet
+                    # First-message error check BEFORE yielding
                     if not yielded_anything and isinstance(msg, dict) and msg.get("type") == "error":
-                        raise ProviderError(...)
+                        err = msg.get("error", {})
+                        text = (err.get("message") if isinstance(err, dict) else str(err)) or "stream error"
+                        raise ProviderError(text)
                     yielded_anything = True
-                    yield msg
+                    yield msg                    # ← this point = "yielded"
                 cb.record_success()
                 return
             except Exception as exc:
                 if not _is_recoverable_error(exc):
                     raise
                 if yielded_anything:
-                    raise   # can't retry after stream started
-                # else: continue inner loop (retry)
+                    raise                       # cannot retry mid-stream
+                # else: fall through to next attempt (retry)
+        else:
+            cb.record_failure()
+
+    raise RateLimitError("all providers in chain exhausted")
 ```
+
+**Mid-stream error handling** (reviewer-recommended clarification): if a provider yields valid content and THEN emits `{"type":"error"}` as a later message, that error is **not** special-cased at the chain level. It flows through to the normalizer, which produces `StreamEvent(kind="error", content=<msg>, raw=<dict>)`. The player sees the error event in its loop but the chain itself does not raise — because the chain already said "success" with the earlier yields. Whether the player treats this as success or failure depends on content checks (e.g., validate_plan) after the stream completes.
 
 ### `tero2/players/base.py` — stream-aware `_run_prompt`
 
@@ -404,7 +446,37 @@ class BasePlayer(ABC):
         return "\n".join(text_parts)
 ```
 
-### `tero2/runner.py` — create StreamBus
+**Subclass cascade** (6 files — `architect.py`, `builder.py`, `scout.py`, `coach.py`, `verifier.py`, `reviewer.py`): каждый имеет identical `__init__(self, chain, disk, *, working_dir="")` → `super().__init__(chain, disk, working_dir=working_dir)`. Добавить `stream_bus=None` kwarg и пробросить в `super`. Механическая правка 6 × ~3 строки.
+
+### `tero2/phases/context.py` — `RunnerContext.stream_bus` + `run_agent` streaming
+
+Добавить поле `stream_bus: StreamBus | None = None` в `RunnerContext` dataclass.
+
+`RunnerContext.run_agent()` — legacy-путь для роли `executor` (и любого прямого `run_agent` вызова). Сейчас итерирует `chain.run_prompt()` и извлекает текст из 3 форм сообщений (str / dict / объект-с-attr). Нужно переделать так же как `BasePlayer._run_prompt`: прогонять каждое сообщение через `get_normalizer(chain.current_provider_name)` и публиковать нормализованные события в `self.stream_bus`.
+
+```python
+async def run_agent(self, chain, prompt_text, *, role="executor") -> tuple[bool, str]:
+    ...
+    captured_parts: list[str] = []
+    async for message in chain.run_prompt(prompt_text):
+        # legacy 3-shape extraction retained for captured_output
+        text_content = _extract_text_from_message(message)
+        if text_content:
+            captured_parts.append(text_content)
+
+        # NEW: normalize + publish to stream_bus
+        if self.stream_bus is not None and isinstance(message, dict):
+            normalizer = get_normalizer(chain.current_provider_name)
+            for event in normalizer.normalize(message, role):
+                self.stream_bus.publish(event)
+        # ...existing step counting / stuck detection / heartbeat logic unchanged
+```
+
+Это закрывает `executor` роль (ранее open question): её stream проходит через `run_agent → stream_bus`, а не через `BasePlayer._run_prompt`.
+
+### `tero2/runner.py` — создаёт StreamBus и кладёт в `RunnerContext`
+
+`Runner` **не** инстанцирует players сам (они создаются внутри phase handlers). Задача Runner'а: создать `StreamBus` и положить его в `RunnerContext`, чтобы phase handlers могли пробросить в players.
 
 ```python
 class Runner:
@@ -416,17 +488,41 @@ class Runner:
     def stream_bus(self) -> StreamBus:
         return self._stream_bus
 
-    def _build_players(self):
-        return {
-            "architect": ArchitectPlayer(chain, disk, stream_bus=self._stream_bus, ...),
-            "builder":   BuilderPlayer(chain, disk, stream_bus=self._stream_bus, ...),
-            "scout":     ScoutPlayer(chain, disk, stream_bus=self._stream_bus, ...),
-            "coach":     CoachPlayer(chain, disk, stream_bus=self._stream_bus, ...),
-            "verifier":  VerifierPlayer(chain, disk, stream_bus=self._stream_bus, ...),
-            "reviewer":  ReviewerPlayer(chain, disk, stream_bus=self._stream_bus, ...),
-            # executor — TBD, depends on current implementation
-        }
+    def _build_runner_context(self) -> RunnerContext:
+        return RunnerContext(
+            config=self.config,
+            disk=self.disk,
+            # ... остальные существующие поля ...
+            dispatcher=self.dispatcher,
+            stream_bus=self._stream_bus,    # NEW
+        )
 ```
+
+### `tero2/phases/*.py` — phase handlers пробрасывают `ctx.stream_bus`
+
+Каждый из 6 phase handlers, создающих player'а, добавляет kwarg `stream_bus=ctx.stream_bus`:
+
+```python
+# architect_phase.py:56
+player = ArchitectPlayer(chain, ctx.disk, working_dir=..., stream_bus=ctx.stream_bus)
+
+# scout_phase.py:57
+player = ScoutPlayer(chain, ctx.disk, working_dir=..., stream_bus=ctx.stream_bus)
+
+# coach_phase.py:54
+player = CoachPlayer(chain, ctx.disk, working_dir=..., stream_bus=ctx.stream_bus)
+
+# harden_phase.py:66
+player = ReviewerPlayer(chain, ctx.disk, stream_bus=ctx.stream_bus)
+
+# execute_phase.py:266
+builder = BuilderPlayer(builder_chain, ctx.disk, working_dir=working_dir, stream_bus=ctx.stream_bus)
+
+# execute_phase.py:306
+verifier = VerifierPlayer(verifier_chain, ctx.disk, working_dir=working_dir, stream_bus=ctx.stream_bus)
+```
+
+Это 6 одинаковых механических правок.
 
 ### `tero2/cli.py` — wire bus into DashboardApp
 
@@ -508,9 +604,11 @@ Header
 **Active-role tracking** (in `RoleStreamPanel` or separate `ActiveRoleTracker`):
 1. Every event updates `last_seen_at[role] = now()`.
 2. "Active" = `now() - last_seen_at[role] < 5s`.
-3. Priority order (hardcoded): `builder > verifier > architect > scout > reviewer > coach > executor`.
-4. If no role is active → `active_role` = last seen role.
-5. If `pinned_role` is set → ignore auto-switch, show pinned role.
+3. **Auto-switch priority order** (hardcoded, отличается от display-order в sidebar): `builder > verifier > architect > scout > reviewer > coach > executor`. Это приоритет **фокуса main-панели** когда несколько ролей активны одновременно.
+4. **Sidebar display order** (hardcoded, используется для hotkey mapping): `scout, architect, builder, coach, verifier, reviewer, executor` — визуальный порядок карточек сверху вниз, соответствует SORA pipeline.
+5. Эти два порядка **намеренно разные**: display показывает логический pipeline flow (scout → architect → builder → …), а auto-switch приоритизирует роли где обычно больше активности для фокуса.
+6. If no role is active → `active_role` = last seen role.
+7. If `pinned_role` is set → ignore auto-switch, show pinned role.
 
 **Pin hotkeys** (1-7):
 - Only active when NOT in stuck mode. `DashboardApp.check_action` already gates 1-5 for stuck options; extend to 1-7 for non-stuck mode.
@@ -519,21 +617,39 @@ Header
 
 ### Hotkeys (BINDINGS)
 
-Add:
+1-7 имеют **два поведения** в зависимости от режима (stuck vs нормальный). В Textual'е самое простое — держать **один binding per digit**, действующий по-разному через `action_*` методы, которые смотрят на `stuck_hint.display`.
+
+Перерабатываем: текущие `stuck_option_1..5` переименовываются в `digit_1..5` (нейтральное имя), добавляются `digit_6` и `digit_7`. Каждый `action_digit_N` внутри решает: если stuck активен → ведёт себя как stuck option (оригинальное поведение), иначе → пинит роль с индексом N.
+
 ```python
+# BINDINGS (обновлённые)
 ("v", "toggle_raw", "Raw"),
 ("c", "clear_stream", "Очистить"),
-("0", "unpin_role", "Unpin"),
-# 1-7 shared with stuck_option_N — gated by check_action
-("6", "stuck_option_6", "6"),   # only if ever needed; currently stuck has only 1-5
-("7", "stuck_option_7", "7"),   # placeholder
+("0", "pin_role_0", "Unpin"),
+("1", "digit_1", "1"),
+("2", "digit_2", "2"),
+("3", "digit_3", "3"),
+("4", "digit_4", "4"),
+("5", "digit_5", "5"),
+("6", "digit_6", "6"),
+("7", "digit_7", "7"),
+
+# action handler
+def action_digit_1(self) -> None:
+    hint = self.query_one("#stuck-hint", StuckHintWidget)
+    if hint.display:
+        self._command_queue.put_nowait(
+            Command("steer", data={"text": "stuck_option_1"}, source="tui")
+        )
+        self._clear_stuck_mode()
+    else:
+        self._pin_role(index=1)   # scout (по order'у sidebar)
+# digit_2..digit_7 — аналогично, индексы 2..7 маппятся на sidebar_role_order
 ```
 
-In `check_action`:
-- If stuck → 1-5 = stuck options (unchanged).
-- If NOT stuck → 1-7 = pin role.
+В `check_action` убираем stuck-gate для 1-5 (раньше были только в stuck mode) — теперь они всегда доступны. Routing решается внутри action'а.
 
-Current stuck options 1-5 и новые 6-7 для pin — через один набор bindings, но разный поведенческий путь в зависимости от `stuck_hint.display`.
+Index → role mapping **жёстко зашит** по `sidebar_role_order` (см. HeartbeatSidebar): 1=scout, 2=architect, 3=builder, 4=coach, 5=verifier, 6=reviewer, 7=executor. 0 → unpin.
 
 ### `DashboardApp` wiring
 
@@ -613,7 +729,7 @@ async def _consume_stream(self):
 
 ### Integration (fake subprocess)
 
-- **`test_cli_provider_streaming.py`**: mock `asyncio.create_subprocess_exec` to yield scripted stdout with delays. Assert `yield` happens BEFORE `proc.wait()` completes (timing assertion using timestamps)
+- **`test_cli_provider_streaming.py`**: mock `asyncio.create_subprocess_exec` to yield scripted stdout controlled by `asyncio.Event` gates. Test flow: consumer iterates `provider.run()`, receives first N yields; at that point `proc.wait()` must still be blocked (verified by `proc.wait()` being pending on an Event that testing code hasn't set yet). Only after consumer acks N yields does the test release the `proc.wait()` gate. This avoids flaky timestamp-based assertions and directly verifies the streaming invariant.
 - **`test_player_stream_integration.py`**: fake chain yielding scripted dicts, fake bus collecting events. Assert bus receives normalized events AND player's returned string contains only text blocks
 
 ### End-to-end
@@ -667,9 +783,11 @@ Each step = one commit, each commit leaves the system in working state.
 - Fallback: `LogView` остаётся в файлах (не удаляем), просто не используется в compose.
 - Verify: TUI запускается, widgets видны (manual smoke), `pytest tests/` green.
 
-### Step 7 — `Runner` creates StreamBus + `cli.py` wires to app
-- Files: `tero2/runner.py`, `tero2/cli.py`, `tests/test_e2e_stream_flow.py`
-- Runner instantiates StreamBus, passes to players.
+### Step 7 — `Runner` creates StreamBus + phase handlers wire in + `cli.py` wires to app
+- Files: `tero2/runner.py`, `tero2/phases/context.py` (RunnerContext.stream_bus field + run_agent stream refactor), `tero2/phases/architect_phase.py`, `tero2/phases/scout_phase.py`, `tero2/phases/coach_phase.py`, `tero2/phases/harden_phase.py`, `tero2/phases/execute_phase.py`, `tero2/cli.py`, `tests/test_e2e_stream_flow.py`
+- Runner instantiates StreamBus, кладёт в RunnerContext.
+- RunnerContext.run_agent публикует в stream_bus (для executor-пути).
+- 6 phase handlers добавляют `stream_bus=ctx.stream_bus` в player constructor calls.
 - `cli.py` grabs `runner.stream_bus`, passes to DashboardApp.
 - End-to-end smoke test: fake CLI → runner → UI shows tool calls in real-time.
 - Verify: ручной smoke run, `pytest tests/test_e2e_stream_flow.py` green.
@@ -680,11 +798,13 @@ Each step = one commit, each commit leaves the system in working state.
 
 (To be resolved during implementation or surfaced via spec-review loop)
 
-1. **`LogView` deprecation path** — удалить в отдельном PR после shakedown или оставить надолго? MVP: не удаляем.
-2. **Heartbeat sidebar на узком экране** — сейчас assume wide. В `on_resize` можно скрывать sidebar и переключаться на tabs-mode — но это out-of-scope v1.
-3. **Executor role status** — сейчас `executor` в config есть, но player отдельный не виден в `players/`. Возможно нужен placeholder normalizer path или role вообще не streamed (ручная команда shell). Уточнить при реализации шага 7.
-4. **Telegram subscription к StreamBus** — в теории Telegram может опционально получать highlights (текстовые блоки). Явно out-of-scope MVP, но структурой bus это позволяется через `subscribe()`.
-5. **Fixtures refresh policy** — когда CLI обновит stream-json формат, fixtures устареют. Нужен ли скрипт для автообновления? MVP: manual, заносим в bugs.md если normalizer перестал работать.
+1. **`LogView` deprecation path** — удалить в отдельном PR после shakedown или оставить надолго? **Decision:** в MVP не удаляем, файл остаётся, в compose не используется. Отдельный cleanup-PR после 2-3 недель shakedown.
+2. **Heartbeat sidebar на узком экране** — сейчас assume wide. Responsive collapse — явно out-of-scope MVP (в списке Out of scope), но упомянуто как потенциальный v2.
+3. **Fixtures refresh policy** — когда CLI обновит stream-json формат, fixtures устареют. **Decision:** manual refresh, заносим в bugs.md если normalizer перестал работать. Скрипт автообновления — out of scope.
+
+Пункт "executor role" (бывший OQ #3 в первой версии) — **разрешён**: executor проходит через `RunnerContext.run_agent`, который получает stream-aware рефактор (см. раздел "phases/context.py"). Это та же точка где остальные players подключаются через `BasePlayer._run_prompt`.
+
+Пункт "Telegram subscription" — **явно out-of-scope**: Telegram не подписывается на StreamBus в MVP (архитектура это позволяет, но поведенческое решение — не подписывать).
 
 ---
 
