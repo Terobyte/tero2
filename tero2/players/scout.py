@@ -171,5 +171,5 @@ def _count_files(working_dir: str) -> int:
     count = 0
     for _root, _dirs, files in os.walk(working_dir):
         _dirs[:] = [d for d in _dirs if d not in _SKIP_DIRS]
-        count += len(files)
+        count += sum(1 for f in files if not f.startswith("."))
     return count
