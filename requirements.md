@@ -416,7 +416,7 @@ def test_bus_survives_subscriber_with_broken_queue():
     _run(scenario())
 ```
 
-- [ ] **Run tests + commit**
+- [x] **Run tests + commit**
 
 ```bash
 uv run pytest tests/test_stream_bus.py -v
@@ -437,13 +437,13 @@ Goal: five provider-specific normalizers converting raw output → `StreamEvent`
 ### Task 4: Normalizer `Protocol`, `FallbackNormalizer`, and dispatcher
 
 **Files:**
-- [ ] Create: `tero2/providers/normalizers/__init__.py`
-- [ ] Create: `tero2/providers/normalizers/base.py`
-- [ ] Create: `tero2/providers/normalizers/fallback.py`
-- [ ] Create: `tests/normalizers/__init__.py`
-- [ ] Create: `tests/normalizers/test_dispatcher.py`
+- [x] Create: `tero2/providers/normalizers/__init__.py`
+- [x] Create: `tero2/providers/normalizers/base.py`
+- [x] Create: `tero2/providers/normalizers/fallback.py`
+- [x] Create: `tests/normalizers/__init__.py`
+- [x] Create: `tests/normalizers/test_dispatcher.py`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```python
 # tests/normalizers/test_dispatcher.py
@@ -472,7 +472,7 @@ def test_fallback_handles_non_dict_raw():
     assert events[0].role == "scout"
 ```
 
-- [ ] **Step 2: Implement Protocol and fallback**
+- [x] **Step 2: Implement Protocol and fallback**
 
 ```python
 # tero2/providers/normalizers/base.py
@@ -562,7 +562,7 @@ __all__ = ["StreamNormalizer", "FallbackNormalizer", "get_normalizer", "register
 # (empty — marker file)
 ```
 
-- [ ] **Run tests + commit**
+- [x] **Run tests + commit**
 
 ```bash
 uv run pytest tests/normalizers/test_dispatcher.py -v

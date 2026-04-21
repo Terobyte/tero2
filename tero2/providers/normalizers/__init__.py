@@ -14,29 +14,34 @@ Protocol contract (see :class:`StreamNormalizer`):
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable
-from datetime import datetime
-
 from tero2.stream_bus import StreamEvent  # noqa: F401 – re-exported for tests
+from tero2.providers.normalizers.base import StreamNormalizer
+from tero2.providers.normalizers.fallback import FallbackNormalizer
 
 
 # ── Registry ─────────────────────────────────────────────────────────────────
 
-_NORMALIZERS: dict[str, Any] = {}
+_FALLBACK = FallbackNormalizer()
+_NORMALIZERS: dict[str, StreamNormalizer] = {}
 
 
-def register(provider_kind: str, normalizer: Any) -> None:
+def register(provider_kind: str, normalizer: StreamNormalizer) -> None:
     """Register *normalizer* under *provider_kind* (e.g. ``"claude"``)."""
     _NORMALIZERS[provider_kind] = normalizer
 
 
-def get_normalizer(provider_kind: str) -> Any | None:
-    """Return the normalizer for *provider_kind*, or ``None`` if not registered.
+def get_normalizer(provider_kind: str) -> StreamNormalizer:
+    """Return the normalizer for *provider_kind*, falling back to :class:`FallbackNormalizer`.
 
     NOT by display_name — display_name may be ``'ZAI (GLM-5.1)'``.
     Use the provider's internal kind key (e.g. ``'zai'``).
+    Unknown kinds return the singleton :data:`_FALLBACK` rather than ``None``,
+    so callers never need an ``if normalizer is None`` guard.
     """
-    return _NORMALIZERS.get(provider_kind)
+    return _NORMALIZERS.get(provider_kind, _FALLBACK)
+
+
+__all__ = ["StreamNormalizer", "FallbackNormalizer", "get_normalizer", "register"]
 
 
 # ── Side-effect imports to populate the registry ─────────────────────────────
