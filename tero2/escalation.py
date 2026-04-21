@@ -82,8 +82,8 @@ def decide_escalation(
     if stuck_result.signal == StuckSignal.NONE:
         return EscalationAction(level=EscalationLevel.NONE)
 
-    # Already at Level 2 or above → escalate to Level 3 (human)
-    if current_level > EscalationLevel.BACKTRACK_COACH:
+    # Already at Level 2 (BACKTRACK_COACH) or above → escalate to Level 3 (human)
+    if current_level >= EscalationLevel.BACKTRACK_COACH:
         return EscalationAction(level=EscalationLevel.HUMAN, should_pause=True)
 
     # At Level 1 → check if diversification window is exhausted

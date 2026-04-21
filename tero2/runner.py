@@ -592,6 +592,8 @@ class Runner:
             state, cont = await self._drain_commands(state)
             if not cont:
                 return
+            if shutdown_event and shutdown_event.is_set():
+                return
             result = await run_architect(ctx, slice_id=next_slice)
             if not result.success:
                 msg = f"Architect failed on {next_slice}: {result.error}"
@@ -607,6 +609,8 @@ class Runner:
             await self._emit_phase(SoraPhase.EXECUTE)
             state, cont = await self._drain_commands(state)
             if not cont:
+                return
+            if shutdown_event and shutdown_event.is_set():
                 return
             exec_result = await run_execute(ctx, slice_plan)
             if not exec_result.success:
@@ -748,8 +752,10 @@ class Runner:
     def _handle_override(self, content: str, state: AgentState) -> AgentState:
         if self._RE_STOP.search(content):
             self._current_state = self.checkpoint.mark_failed(state, "STOP directive in OVERRIDE.md")
+            object.__setattr__(state, "phase", self._current_state.phase)
             return self._current_state
         if self._RE_PAUSE.search(content) and state.phase != Phase.PAUSED:
             self._current_state = self.checkpoint.mark_paused(state, "PAUSE directive in OVERRIDE.md")
+            object.__setattr__(state, "phase", self._current_state.phase)
             return self._current_state
         return state

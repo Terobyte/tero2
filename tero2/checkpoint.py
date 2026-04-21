@@ -42,7 +42,16 @@ class CheckpointManager:
         return state
 
     def mark_started(self, plan_file: str) -> AgentState:
-        state = AgentState()
+        # Restore prior state so accumulated context (retry_count, current_task,
+        # steps_in_task, etc.) survives a restart after FAILED or PAUSED.
+        # IDLE is safe too — it's a valid IDLE → RUNNING transition.
+        # If the on-disk phase is RUNNING or COMPLETED (unexpected), fall back to
+        # a clean state to avoid invalid double-start transitions.
+        prior = self.restore()
+        if prior.phase in (Phase.IDLE, Phase.FAILED, Phase.PAUSED):
+            state = prior
+        else:
+            state = AgentState()
         state = self._transition(state, Phase.RUNNING)
         state.plan_file = str(plan_file)
         state.started_at = datetime.now(timezone.utc).isoformat()

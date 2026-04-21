@@ -593,7 +593,7 @@ git commit -m "add normalizer protocol, fallback, and dispatcher"
 
 - [x] **Step 3: Manual review** — confirm each `.jsonl` has valid JSON per line, no secrets leaked. Collectively covers: text, tool_use, tool_result, thinking, turn_end, error. Note capture date in `tests/normalizers/fixtures/README.md`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tests/normalizers/fixtures/
@@ -605,21 +605,21 @@ git commit -m "add provider stream fixtures for normalizer tests"
 ### Task 6: `ClaudeNormalizer`
 
 **Files:**
-- [ ] Create: `tero2/providers/normalizers/claude.py`
-- [ ] Create: `tests/normalizers/test_claude.py`
+- [x] Create: `tero2/providers/normalizers/claude.py`
+- [x] Create: `tests/normalizers/test_claude.py`
 
 Claude stream-JSON mapping:
-- [ ] `{"type":"system","tools":[...]}` → one `kind="status"` with `content="init: N tools"`
-- [ ] `{"type":"assistant","message":{"content":[...blocks...]}}`:
+- [x] `{"type":"system","tools":[...]}` → one `kind="status"` with `content="init: N tools"`
+- [x] `{"type":"assistant","message":{"content":[...blocks...]}}`:
   - `text` block → `kind="text", content=text`
   - `tool_use` block → `kind="tool_use", tool_name, tool_args, tool_id`
   - `thinking` block → `kind="thinking", content=thinking`
-- [ ] `{"type":"user","message":{"content":[{type:"tool_result","tool_use_id","content":...}]}}` → `kind="tool_result", tool_id, tool_output=<stringified>`
-- [ ] `{"type":"result","subtype":"success"}` → `kind="turn_end"`
-- [ ] `{"type":"error","error":{"message":"..."}}` → `kind="error", content=message`
-- [ ] Anything else → empty iterable
+- [x] `{"type":"user","message":{"content":[{type:"tool_result","tool_use_id","content":...}]}}` → `kind="tool_result", tool_id, tool_output=<stringified>`
+- [x] `{"type":"result","subtype":"success"}` → `kind="turn_end"`
+- [x] `{"type":"error","error":{"message":"..."}}` → `kind="error", content=message`
+- [x] Anything else → empty iterable
 
-- [ ] **Step 1: Failing tests** — one per block type + multi-block assistant + malformed (missing `message`) → single error event + 2 golden-fixture tests (happy + rate_limit).
+- [x] **Step 1: Failing tests** — one per block type + multi-block assistant + malformed (missing `message`) → single error event + 2 golden-fixture tests (happy + rate_limit).
 
 ```python
 # tests/normalizers/test_claude.py
@@ -745,7 +745,7 @@ def test_claude_rate_limit_fixture():
     assert any(e.kind == "error" for e in events)
 ```
 
-- [ ] **Step 2: Implement**
+- [x] **Step 2: Implement**
 
 ```python
 # tero2/providers/normalizers/claude.py
@@ -845,7 +845,7 @@ class ClaudeNormalizer:
 register("claude", ClaudeNormalizer())
 ```
 
-- [ ] **Step 3: Register via side-effect import** — add to `tero2/providers/normalizers/__init__.py`:
+- [x] **Step 3: Register via side-effect import** — add to `tero2/providers/normalizers/__init__.py`:
 
 ```python
 from tero2.providers.normalizers import claude  # noqa: F401,E402

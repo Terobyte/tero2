@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shlex
 from typing import Any
 
 from tero2.errors import ProviderError
@@ -23,10 +24,11 @@ class ShellProvider(BaseProvider):
 
     async def run(self, **kwargs: Any) -> Any:
         prompt = kwargs.get("prompt", "")
+        # Split into tokens so shell metacharacters (;, &&, $(), |) are never
+        # interpreted - each token is passed directly to execvp, not to a shell.
+        args = shlex.split(prompt) if prompt.strip() else ["bash"]
         proc = await asyncio.create_subprocess_exec(
-            "bash",
-            "-c",
-            prompt,
+            *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

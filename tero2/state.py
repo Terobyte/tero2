@@ -189,6 +189,13 @@ class AgentState:
         tmp = path.with_suffix(".tmp")
         tmp.write_text(self.to_json(), encoding="utf-8")
         os.replace(tmp, path)
+        # Remember the last save path so touch() can persist without a path arg.
+        # Uses object.__setattr__ to bypass the phase-guard __setattr__ and to
+        # keep _last_path out of dataclasses.fields() → it won't appear in to_json().
+        object.__setattr__(self, "_last_path", path)
 
     def touch(self) -> None:
         self.updated_at = datetime.now(timezone.utc).isoformat()
+        last: Path | None = getattr(self, "_last_path", None)
+        if last is not None:
+            self.save(last)

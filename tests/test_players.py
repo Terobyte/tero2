@@ -601,6 +601,7 @@ class TestCoachPlayer:
         from tero2.players.coach import CoachPlayer
 
         disk = _make_disk(tmp_path)
+        disk.read_metrics()  # establish baseline required before write
         disk.write_metrics({"total_cost_usd": 1.23, "tokens": 50000})
 
         captured: list[str] = []

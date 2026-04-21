@@ -168,7 +168,7 @@ class CLIProvider(BaseProvider):
         if stderr_task is not None:
             try:
                 stderr_bytes = stderr_task.result() if stderr_task.done() else await stderr_task
-            except (asyncio.CancelledError, Exception):
+            except Exception:
                 stderr_bytes = b""
         await proc.wait()
 

@@ -678,6 +678,7 @@ class TestUpdateTaskMetrics:
         project.mkdir()
         disk = DiskLayer(project)
         disk.init()
+        disk.read_metrics()  # establish baseline required before write
         disk.write_metrics({"tasks_attempted": 2, "tasks_passed": 1})
 
         _update_task_metrics(disk, "T03", False)
@@ -692,6 +693,7 @@ class TestUpdateTaskMetrics:
         project.mkdir()
         disk = DiskLayer(project)
         disk.init()
+        disk.read_metrics()  # establish baseline required before write
         disk.write_metrics({"tasks_attempted": 1, "tasks_passed": 0})
 
         _update_task_metrics(disk, "T02", True)

@@ -79,7 +79,12 @@ class DiskLayer:
             return data
 
     def write_metrics(self, metrics: dict) -> None:
-        last_read: dict = getattr(self._metrics_thread_local, "last_read", {})
+        if not hasattr(self._metrics_thread_local, "last_read"):
+            raise ValueError(
+                "write_metrics called without a prior read_metrics on this instance. "
+                "Call read_metrics() first to establish a baseline."
+            )
+        last_read: dict = self._metrics_thread_local.last_read
         with self._metrics_lock:
             # Re-read current state under lock to prevent lost updates
             current = self._read_metrics_raw()

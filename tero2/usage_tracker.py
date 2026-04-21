@@ -6,6 +6,7 @@ import asyncio
 import json
 import random
 import subprocess
+import threading
 from typing import Any
 
 
@@ -44,6 +45,7 @@ class UsageTracker:
         self._total_cost: float = 0.0
         self._providers: dict[str, dict[str, Any]] = {}
         self._session_lock = asyncio.Lock()
+        self._providers_lock = threading.Lock()  # guards _providers in record_step
 
     # ── limit fetching ─────────────────────────────────────────────────
 
@@ -109,21 +111,22 @@ class UsageTracker:
         self._total_tokens += tokens
         self._total_cost += cost
 
-        if provider not in self._providers:
-            self._providers[provider] = {
-                "tokens": 0,
-                "cost": 0.0,
-                "steps": 0,
-                "is_estimated": is_estimated,
-            }
+        with self._providers_lock:
+            if provider not in self._providers:
+                self._providers[provider] = {
+                    "tokens": 0,
+                    "cost": 0.0,
+                    "steps": 0,
+                    "is_estimated": is_estimated,
+                }
 
-        entry = self._providers[provider]
-        entry["tokens"] += tokens
-        entry["cost"] += cost
-        entry["steps"] += 1
-        # if any step is estimated, mark provider as estimated
-        if is_estimated:
-            entry["is_estimated"] = True
+            entry = self._providers[provider]
+            entry["tokens"] += tokens
+            entry["cost"] += cost
+            entry["steps"] += 1
+            # if any step is estimated, mark provider as estimated
+            if is_estimated:
+                entry["is_estimated"] = True
 
     def session_summary(self) -> dict[str, Any]:
         """Return totals and per-provider breakdown for the current session."""
