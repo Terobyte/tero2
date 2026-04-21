@@ -22,6 +22,16 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Literal
 
+StreamEventKind = Literal[
+    "text",       # agent narration
+    "tool_use",   # tool invocation
+    "tool_result",  # tool result
+    "thinking",   # chain-of-thought block
+    "status",     # start / end / turn_boundary marker
+    "error",      # stream or parse error
+    "turn_end",   # CLIProvider emits after proc.wait() completes
+]
+
 
 # ── StreamEvent dataclass ────────────────────────────────────────────────────
 
@@ -46,15 +56,7 @@ class StreamEvent:
     """
 
     role: str
-    kind: Literal[
-        "text",  # agent narration
-        "tool_use",  # tool invocation
-        "tool_result",  # tool result
-        "thinking",  # chain-of-thought block
-        "status",  # start / end / turn_boundary marker
-        "error",  # stream or parse error
-        "turn_end",  # CLIProvider emits after proc.wait() completes
-    ]
+    kind: StreamEventKind
     timestamp: datetime
     content: str = ""
     tool_name: str = ""
@@ -66,15 +68,7 @@ class StreamEvent:
 
 def make_stream_event(
     role: str,
-    kind: Literal[
-        "text",
-        "tool_use",
-        "tool_result",
-        "thinking",
-        "status",
-        "error",
-        "turn_end",
-    ],
+    kind: StreamEventKind,
     *,
     timestamp: datetime | None = None,
     content: str = "",
@@ -148,25 +142,36 @@ class StreamBus:
         """Publish *event* to all registered subscribers.
 
         Called synchronously from within async provider loops. Captures the
-        running event loop on the first call. If called from a different thread,
-        delegates to ``loop.call_soon_threadsafe``. If no loop is running,
-        the call is silently ignored (e.g. during unit tests that bypass async).
+        running event loop on the first call. If called from a worker thread
+        (no running loop in that thread), delegates to the captured main loop
+        via ``call_soon_threadsafe``. If no loop has been captured yet, the
+        call is silently dropped.
         """
-        if self._loop is None:
-            try:
-                self._loop = asyncio.get_running_loop()
-            except RuntimeError:
-                return
         try:
             current_loop = asyncio.get_running_loop()
         except RuntimeError:
-            # Called from a worker thread (no running loop here) — dispatch
-            # safely onto the captured event loop instead of dropping the event.
-            self._loop.call_soon_threadsafe(self._publish_impl, event)
+            # Worker-thread path: no event loop running in this thread.
+            # Forward to the captured main loop if one is available and still open.
+            # Guard against the asyncio.run()-restart scenario: each asyncio.run()
+            # call closes the previous loop, so self._loop may point to a closed
+            # loop if the StreamBus outlives one asyncio.run() session.
+            if self._loop is not None and not self._loop.is_closed():
+                self._loop.call_soon_threadsafe(self._publish_impl, event)
             return
-        if current_loop is not self._loop:
-            self._loop.call_soon_threadsafe(self._publish_impl, event)
-            return
+        if self._loop is None:
+            # First call from an event loop — capture it as the authoritative loop.
+            self._loop = current_loop
+        elif current_loop is not self._loop:
+            # Foreign event-loop thread: marshal onto the captured main loop so
+            # _publish_impl always executes on the same loop that owns the queues.
+            # Exception: if the cached loop has been closed (e.g. after an
+            # asyncio.run() restart), adopt the new loop instead of forwarding
+            # to the dead one, which would raise RuntimeError or silently drop.
+            if self._loop.is_closed():
+                self._loop = current_loop
+            else:
+                self._loop.call_soon_threadsafe(self._publish_impl, event)
+                return
         self._publish_impl(event)
 
     def _publish_impl(self, event: StreamEvent) -> None:

@@ -226,7 +226,7 @@ def make_stream_event(
     )
 ```
 
-- [ ] **Run tests + commit**
+- [x] **Run tests + commit**
 
 ```bash
 uv run pytest tests/test_stream_bus.py -v
@@ -243,10 +243,10 @@ git commit -m "add StreamEvent dataclass and factory"
 ### Task 2: `StreamBus.subscribe` / `publish` / `unsubscribe` happy path
 
 **Files:**
-- [ ] Modify: `tero2/stream_bus.py`
-- [ ] Modify: `tests/test_stream_bus.py`
+- [x] Modify: `tero2/stream_bus.py`
+- [x] Modify: `tests/test_stream_bus.py`
 
-- [ ] **Step 1: Append failing tests**
+- [x] **Step 1: Append failing tests**
 
 ```python
 # tests/test_stream_bus.py — appended
@@ -302,7 +302,7 @@ def test_bus_unsubscribe_unknown_queue_is_silent():
     _run(scenario())
 ```
 
-- [ ] **Step 2: Add `StreamBus` class**
+- [x] **Step 2: Add `StreamBus` class**
 
 ```python
 # tero2/stream_bus.py — append below make_stream_event
@@ -355,7 +355,7 @@ class StreamBus:
                 pass
 ```
 
-- [ ] **Run tests + commit**
+- [x] **Run tests + commit**
 
 ```bash
 uv run pytest tests/test_stream_bus.py -v
@@ -372,9 +372,9 @@ git commit -m "add StreamBus subscribe/publish"
 ### Task 3: Ring-buffer drop-oldest + dead subscriber tolerance
 
 **Files:**
-- [ ] Modify: `tests/test_stream_bus.py`
+- [x] Modify: `tests/test_stream_bus.py`
 
-- [ ] **Step 1: Append tests**
+- [x] **Step 1: Append tests**
 
 ```python
 # tests/test_stream_bus.py — appended
