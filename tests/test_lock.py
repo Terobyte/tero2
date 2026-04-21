@@ -45,7 +45,8 @@ class TestAcquireStaleLockRecovery:
             fl.acquire()
         assert exc_info.value.pid == alive_pid
 
-    def test_dead_pid_retries_without_unlink(self, tmp_path: Path) -> None:
+    def test_dead_pid_raises_lock_held_error(self, tmp_path: Path) -> None:
+        """Bug 4 fix: dead PID must raise LockHeldError immediately, no retry."""
         lock_path = tmp_path / "test.lock"
         dead_pid = 8888888
         _write_pid(lock_path, dead_pid)
@@ -55,24 +56,22 @@ class TestAcquireStaleLockRecovery:
         def flock_side_effect(fd, op):
             nonlocal call_count
             call_count += 1
-            if call_count == 1:
-                raise OSError(errno.EACCES, "Permission denied")
+            raise OSError(errno.EACCES, "Permission denied")
 
         with (
             patch("tero2.lock.os.open", return_value=3),
             patch("tero2.lock.fcntl.flock", side_effect=flock_side_effect),
             patch("tero2.lock.os.close"),
-            patch("tero2.lock.os.ftruncate"),
-            patch("tero2.lock.os.lseek"),
-            patch("tero2.lock.os.write"),
             patch("tero2.lock.os.getpid", return_value=1),
             patch.object(fl, "_pid_alive", return_value=False),
+            pytest.raises(LockHeldError),
         ):
             fl.acquire()
 
-        assert call_count == 2
+        assert call_count == 1
 
-    def test_retry_once_raises_on_second_failure(self, tmp_path: Path) -> None:
+    def test_dead_pid_raises_immediately_no_double_flock(self, tmp_path: Path) -> None:
+        """Bug 4 fix: flock must be attempted exactly once before raising."""
         lock_path = tmp_path / "test.lock"
         dead_pid = 7777777
         _write_pid(lock_path, dead_pid)
@@ -94,9 +93,10 @@ class TestAcquireStaleLockRecovery:
         ):
             fl.acquire()
 
-        assert call_count == 2
+        assert call_count == 1
 
-    def test_no_pid_in_file_removes_and_retries(self, tmp_path: Path) -> None:
+    def test_no_pid_in_file_raises_immediately(self, tmp_path: Path) -> None:
+        """Bug 4 fix: unparseable PID (pid=0) must raise LockHeldError, not retry."""
         lock_path = tmp_path / "test.lock"
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         lock_path.write_text("not_a_number\n")
@@ -106,21 +106,18 @@ class TestAcquireStaleLockRecovery:
         def flock_side_effect(fd, op):
             nonlocal call_count
             call_count += 1
-            if call_count == 1:
-                raise OSError(errno.EAGAIN, "try again")
+            raise OSError(errno.EAGAIN, "try again")
 
         with (
             patch("tero2.lock.os.open", return_value=3),
             patch("tero2.lock.fcntl.flock", side_effect=flock_side_effect),
             patch("tero2.lock.os.close"),
-            patch("tero2.lock.os.ftruncate"),
-            patch("tero2.lock.os.lseek"),
-            patch("tero2.lock.os.write"),
             patch("tero2.lock.os.getpid", return_value=1),
+            pytest.raises(LockHeldError),
         ):
             fl.acquire()
 
-        assert call_count == 2
+        assert call_count == 1
 
 
 class TestPidAliveEperm:
@@ -146,7 +143,8 @@ class TestPidAliveEperm:
         assert exc_info.value.pid == pid
         assert lock_path.exists()
 
-    def test_esrch_treated_as_dead(self, tmp_path: Path) -> None:
+    def test_esrch_treated_as_dead_raises_immediately(self, tmp_path: Path) -> None:
+        """Bug 4 fix: ESRCH (dead process) must raise LockHeldError immediately, no retry."""
         lock_path = tmp_path / "esrch.lock"
         pid = 8888888
         _write_pid(lock_path, pid)
@@ -156,21 +154,18 @@ class TestPidAliveEperm:
         def flock_side_effect(fd, op):
             nonlocal call_count
             call_count += 1
-            if call_count == 1:
-                raise OSError(errno.EAGAIN, "try again")
+            raise OSError(errno.EAGAIN, "try again")
 
         with (
             patch("tero2.lock.os.open", return_value=3),
             patch("tero2.lock.fcntl.flock", side_effect=flock_side_effect),
             patch("tero2.lock.os.close"),
-            patch("tero2.lock.os.ftruncate"),
-            patch("tero2.lock.os.lseek"),
-            patch("tero2.lock.os.write"),
             patch("tero2.lock.os.getpid", return_value=1),
             patch("tero2.lock.os.kill", side_effect=OSError(errno.ESRCH, "No such process")),
+            pytest.raises(LockHeldError),
         ):
             fl.acquire()
-        assert call_count == 2
+        assert call_count == 1
 
 
 class TestFlockPidWriteRace:
@@ -178,6 +173,7 @@ class TestFlockPidWriteRace:
     a process that has not yet written its PID to the file."""
 
     def test_no_unlink_when_flock_held_pid_not_written(self, tmp_path: Path) -> None:
+        """Bug 4 fix: no TOCTOU retry — flock called once, lock file preserved."""
         lock_path = tmp_path / "race.lock"
         stale_pid = 8888888
         _write_pid(lock_path, stale_pid)
@@ -199,7 +195,7 @@ class TestFlockPidWriteRace:
         ):
             fl.acquire()
 
-        assert flock_calls == 2
+        assert flock_calls == 1
         assert lock_path.exists()
 
 

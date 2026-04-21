@@ -15,7 +15,7 @@ class FileLock:
         self.lock_path = lock_path
         self._fd: int | None = None
 
-    def acquire(self, *, _retried: bool = False) -> None:
+    def acquire(self) -> None:
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(str(self.lock_path), os.O_CREAT | os.O_RDWR, 0o644)
         try:
@@ -24,11 +24,7 @@ class FileLock:
             os.close(fd)
             if exc.errno in (errno.EAGAIN, errno.EACCES):
                 pid = self._read_pid()
-                if pid and self._pid_alive(pid):
-                    raise LockHeldError(pid, str(self.lock_path)) from exc
-                if _retried:
-                    raise LockHeldError(pid, str(self.lock_path)) from exc
-                return self.acquire(_retried=True)
+                raise LockHeldError(pid, str(self.lock_path)) from exc
             raise
         os.ftruncate(fd, 0)
         os.lseek(fd, 0, os.SEEK_SET)
