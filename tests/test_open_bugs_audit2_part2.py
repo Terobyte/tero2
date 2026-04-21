@@ -23,6 +23,7 @@ Bugs tested here:
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import inspect
 import threading
@@ -77,47 +78,105 @@ class TestBug48SliceLoopShutdownCheck:
     each run_architect / run_execute invocation in the while loop.
     """
 
-    def test_execute_sora_checks_shutdown_before_architect_in_slice_loop(self) -> None:
-        from tero2.runner import Runner
+    # ── shared AST helpers ────────────────────────────────────────────────────
 
-        source = inspect.getsource(Runner._execute_sora)
+    @staticmethod
+    def _find_slice_while(tree: ast.AST) -> ast.While | None:
+        """Return the `while extra_slices_done ...` node, or None."""
+        for node in ast.walk(tree):
+            if isinstance(node, ast.While) and "extra_slices_done" in ast.dump(node.test):
+                return node
+        return None
 
-        # We need the shutdown check to appear AFTER the while loop header
-        # and BEFORE run_architect. The simplest proxy: count how many times
-        # shutdown_event.is_set() appears in the entire method.
-        # A proper fix adds at least one check inside the slice while loop.
-        checks = source.count("shutdown_event.is_set()")
+    @staticmethod
+    def _is_shutdown_guard(node: ast.stmt) -> bool:
+        """True iff *node* is an If whose condition calls shutdown_event.is_set()."""
+        if not isinstance(node, ast.If):
+            return False
+        for sub in ast.walk(node.test):
+            if (
+                isinstance(sub, ast.Call)
+                and isinstance(sub.func, ast.Attribute)
+                and sub.func.attr == "is_set"
+                and isinstance(sub.func.value, ast.Name)
+                and sub.func.value.id == "shutdown_event"
+            ):
+                return True
+        return False
 
-        # The slice loop needs its own check; the method already has one at the
-        # top of the retry function — so a fixed implementation has >= 2.
-        assert checks >= 2, (
-            f"Bug 48: _execute_sora has only {checks} shutdown_event.is_set() check(s). "
-            "The extra-slice while loop must also check shutdown_event before invoking "
-            "run_architect() or run_execute() — long calls block graceful shutdown. "
-            "Fix: add shutdown_event.is_set() guard at each phase boundary in the slice loop."
+    @staticmethod
+    def _is_await_call(node: ast.stmt, func_name: str) -> bool:
+        """True iff *node* is `... = await func_name(...)` or `await func_name(...)`."""
+        val: ast.expr | None = None
+        if isinstance(node, ast.Assign):
+            val = node.value
+        elif isinstance(node, ast.Expr):
+            val = node.value
+        if val is None or not isinstance(val, ast.Await):
+            return False
+        call = val.value
+        return (
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Name)
+            and call.func.id == func_name
         )
 
-    def test_execute_sora_slice_loop_respects_shutdown_mid_run(self) -> None:
-        """The slice loop must exit cleanly when shutdown fires after a phase starts.
+    # ── tests ─────────────────────────────────────────────────────────────────
 
-        Structural proxy: verify shutdown_event is referenced inside the while-loop
-        body (not just at the top of the method before the loop).
-        """
+    def test_slice_loop_has_shutdown_guard_before_run_architect(self) -> None:
+        """AST check: a shutdown_event.is_set() If-guard must precede run_architect
+        in the extra-slice while loop body."""
+        import textwrap
+
         from tero2.runner import Runner
-        import ast, textwrap
 
-        src = inspect.getsource(Runner._execute_sora)
-        # Find the start of the extra_slices while loop
-        loop_marker = "while extra_slices_done"
-        loop_start = src.find(loop_marker)
-        assert loop_start != -1, "Could not locate the extra-slice while loop in source."
+        src = textwrap.dedent(inspect.getsource(Runner._execute_sora))
+        tree = ast.parse(src)
 
-        loop_body = src[loop_start:]
-        has_shutdown_in_loop = "shutdown_event" in loop_body
+        slice_while = self._find_slice_while(tree)
+        assert slice_while is not None, "Cannot locate `while extra_slices_done` in _execute_sora."
 
-        assert has_shutdown_in_loop, (
-            "Bug 48: the extra-slice while loop body contains no reference to shutdown_event. "
-            "A SIGTERM received during run_architect/run_execute is ignored until the call ends."
+        prev_was_guard = False
+        architect_guarded = False
+        for stmt in slice_while.body:
+            if self._is_await_call(stmt, "run_architect") and prev_was_guard:
+                architect_guarded = True
+            prev_was_guard = self._is_shutdown_guard(stmt)
+
+        assert architect_guarded, (
+            "Bug 48: no shutdown_event.is_set() guard found immediately before "
+            "run_architect() in the extra-slice while loop. "
+            "A SIGTERM received during the long architect call is ignored until it returns. "
+            "Fix: add `if shutdown_event and shutdown_event.is_set(): return` "
+            "immediately before the run_architect() call in the slice loop."
+        )
+
+    def test_slice_loop_has_shutdown_guard_before_run_execute(self) -> None:
+        """AST check: a shutdown_event.is_set() If-guard must precede run_execute
+        in the extra-slice while loop body."""
+        import textwrap
+
+        from tero2.runner import Runner
+
+        src = textwrap.dedent(inspect.getsource(Runner._execute_sora))
+        tree = ast.parse(src)
+
+        slice_while = self._find_slice_while(tree)
+        assert slice_while is not None, "Cannot locate `while extra_slices_done` in _execute_sora."
+
+        prev_was_guard = False
+        execute_guarded = False
+        for stmt in slice_while.body:
+            if self._is_await_call(stmt, "run_execute") and prev_was_guard:
+                execute_guarded = True
+            prev_was_guard = self._is_shutdown_guard(stmt)
+
+        assert execute_guarded, (
+            "Bug 48: no shutdown_event.is_set() guard found immediately before "
+            "run_execute() in the extra-slice while loop. "
+            "A SIGTERM received during the long execute call is ignored until it returns. "
+            "Fix: add `if shutdown_event and shutdown_event.is_set(): return` "
+            "immediately before the run_execute() call in the slice loop."
         )
 
 
@@ -125,67 +184,89 @@ class TestBug48SliceLoopShutdownCheck:
 
 
 class TestBug52StderrLossOnCancel:
-    """_collect_output swallows CancelledError from stderr_task, returning b"".
+    """_stream_events swallows CancelledError from stderr_task, returning b"".
 
-    When the caller cancels the outer coroutine while `await stderr_task` is in
-    flight, the except clause at the end of _collect_output catches CancelledError
-    and silently returns b"" — discarding any partial stderr already captured.
+    After reading all stdout lines, _stream_events awaits the stderr_task result
+    inside `except (asyncio.CancelledError, Exception): stderr_bytes = b""`.
+    When the caller cancels the outer coroutine while that await is in flight,
+    the CancelledError is caught and silently discarded — both the error signal
+    and any partial stderr already captured are lost.
 
-    Fix: re-raise CancelledError after recording captured bytes, or shield
-    stderr_task so cancellation doesn't propagate through it.
+    Fix: remove asyncio.CancelledError from the broad except clause in the
+    stderr_task result section, or catch it separately and re-raise after
+    recording the captured bytes.
+
+    Note: the method responsible for this is `_stream_events`, not the
+    (non-existent) `_collect_output`.
     """
 
-    def test_collect_output_reraises_cancelled_error_after_recording_stderr(self) -> None:
-        from tero2.providers.cli import CLIProvider
+    # ── shared AST helpers ────────────────────────────────────────────────────
 
-        source = inspect.getsource(CLIProvider._collect_output)
+    @staticmethod
+    def _catches_cancelled_error(handler: ast.ExceptHandler) -> bool:
+        """True iff this except clause matches asyncio.CancelledError."""
+        if handler.type is None:
+            return True  # bare `except:` catches everything
+        return "CancelledError" in ast.dump(handler.type)
 
-        # The bug: CancelledError is listed in the except tuple, swallowing it.
-        # A fix would either not catch CancelledError or re-raise it.
-        has_cancel_in_bare_except = (
-            "CancelledError, Exception" in source or
-            "asyncio.CancelledError" in source and "except" in source
-        )
-        # Check if CancelledError is re-raised after being caught
-        reraises = "raise" in source
+    @staticmethod
+    def _has_bare_reraise(handler: ast.ExceptHandler) -> bool:
+        """True iff the handler body contains a bare ``raise`` (no argument).
 
-        if has_cancel_in_bare_except and not reraises:
-            pytest.fail(
-                "Bug 52: _collect_output catches asyncio.CancelledError and returns b'' "
-                "without re-raising. Any partial stderr captured before cancellation is lost. "
-                "Fix: separate CancelledError from the except clause and re-raise it, "
-                "or save captured stderr_bytes before re-raising."
-            )
-
-    def test_cancelled_error_not_in_broad_swallow_clause(self) -> None:
-        """The except clause must not silently swallow CancelledError.
-
-        When _collect_output is cancelled while awaiting stderr_task, the
-        CancelledError must propagate to the caller (or be re-raised after
-        recording partial stderr). The current code catches it together with
-        all other exceptions and returns b"", losing both the error signal
-        and any partial stderr data.
-
-        Fix: remove asyncio.CancelledError from the except tuple in the
-        stderr_task result section, or catch it separately and re-raise.
+        A bare ``raise`` re-raises the currently-handled exception, propagating
+        CancelledError to the caller.  ``raise SomeOtherError()`` would also be
+        an ``ast.Raise`` node but with a non-None ``exc`` attribute — that
+        translates the exception rather than propagating it, so it does NOT
+        count as a correct cancellation-safe handler.
         """
+        return any(
+            isinstance(n, ast.Raise) and n.exc is None for n in ast.walk(handler)
+        )
+
+    # ── tests ─────────────────────────────────────────────────────────────────
+
+    def test_stream_events_method_exists(self) -> None:
+        """The stderr-collection logic lives in _stream_events, not _collect_output."""
         from tero2.providers.cli import CLIProvider
 
-        source = inspect.getsource(CLIProvider._collect_output)
-
-        # Find the final stderr_task result section (after normal stdout loop).
-        # Bug pattern: "except (asyncio.CancelledError, Exception): stderr_bytes = b''"
-        # which silently swallows the cancellation.
-        cancel_in_swallow = (
-            "CancelledError, Exception" in source
-            or "CancelledError," in source
+        assert hasattr(CLIProvider, "_stream_events"), (
+            "CLIProvider._stream_events does not exist. "
+            "The Bug 52 tests target this method; check the class for renames."
         )
-        reraises_cancel = "raise" in source
 
-        assert not (cancel_in_swallow and not reraises_cancel), (
-            "Bug 52: _collect_output catches asyncio.CancelledError in a broad except "
-            "without re-raising. When the caller cancels the coroutine, CancelledError "
-            "is swallowed and stderr_bytes = b'' hides the cancellation from the caller. "
-            "Fix: don't catch CancelledError in the stderr result section, or re-raise it "
-            "after capturing partial stderr bytes."
+    def test_stream_events_does_not_swallow_cancelled_error(self) -> None:
+        """AST check: no ExceptHandler in _stream_events may catch CancelledError
+        without re-raising it.
+
+        The buggy pattern:
+            except (asyncio.CancelledError, Exception):
+                stderr_bytes = b""   # no raise!
+
+        This silently discards both the cancellation signal and partial stderr.
+        A correct handler either omits CancelledError from the except clause,
+        or catches it separately and re-raises.
+        """
+        import textwrap
+
+        from tero2.providers.cli import CLIProvider
+
+        src = textwrap.dedent(inspect.getsource(CLIProvider._stream_events))
+        tree = ast.parse(src)
+
+        swallowing_handlers = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ExceptHandler)
+            and self._catches_cancelled_error(node)
+            and not self._has_bare_reraise(node)
+        ]
+
+        assert not swallowing_handlers, (
+            "Bug 52: _stream_events has an except clause that catches "
+            "asyncio.CancelledError without re-raising it. "
+            "When the coroutine is cancelled while awaiting stderr_task, "
+            "the cancellation is silently swallowed and stderr_bytes = b'' "
+            "hides the error from the caller. "
+            "Fix: remove asyncio.CancelledError from the broad except tuple in "
+            "the stderr_task result section, or catch it separately and re-raise."
         )

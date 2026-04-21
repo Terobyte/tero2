@@ -250,24 +250,6 @@ class TestBug55TouchNoPersist:
             f"but disk still has {on_disk.updated_at!r}. touch() never calls save()."
         )
 
-    def test_touch_does_not_call_save_method(self, tmp_path: Path) -> None:
-        """Verify touch() mutates memory without writing to disk (structural check)."""
-        from tero2.state import AgentState
-        import time
-
-        state = AgentState()
-        state_path = tmp_path / "STATE.json"
-        state.save(state_path)
-
-        before_mtime = state_path.stat().st_mtime
-        time.sleep(0.02)
-        state.touch()
-        after_mtime = state_path.stat().st_mtime
-
-        assert after_mtime == before_mtime, (
-            "Bug 55 appears fixed: touch() now writes to disk (mtime changed). "
-            "If intentional, remove this test."
-        )
 
 
 # ── Bug 56: checkpoint.mark_started() discards prior state ───────────────────
