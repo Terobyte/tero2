@@ -928,8 +928,8 @@ class_name = type(raw).__name__  # "AssistantMessage" / "UserMessage" / "ResultM
 # Attribute names on blocks: .text, .name, .input, .id, .tool_use_id, .content, .thinking
 ```
 
-- [ ] Tests + impl + `register("zai", ZaiNormalizer())` + side-effect import.
-- [ ] Commit: `"add zai SDK-stream normalizer"`
+- [x] Tests + impl + `register("zai", ZaiNormalizer())` + side-effect import.
+- [x] Commit: `"add zai SDK-stream normalizer"`
 
 After Task 10:
 
