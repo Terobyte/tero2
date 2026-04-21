@@ -892,13 +892,13 @@ If fixture shape disagrees with the mapping, update the mapping and note actual 
 **Files:** `tero2/providers/normalizers/opencode.py`, `tests/normalizers/test_opencode.py`
 
 OpenCode `--format json` typically uses `event` key:
-- [ ] `{"event":"message","role":"assistant","text":"..."}` → `kind="text"`
-- [ ] `{"event":"tool_call","name":"...","args":{...},"id":"..."}` → `kind="tool_use"`
-- [ ] `{"event":"tool_result","id":"...","result":"..."}` → `kind="tool_result"`
-- [ ] `{"event":"end"}` → `kind="turn_end"`
-- [ ] `{"event":"error","message":"..."}` → `kind="error"`
+- [x] `{"event":"message","role":"assistant","text":"..."}` → `kind="text"`
+- [x] `{"event":"tool_call","name":"...","args":{...},"id":"..."}` → `kind="tool_use"`
+- [x] `{"event":"tool_result","id":"...","result":"..."}` → `kind="tool_result"`
+- [x] `{"event":"end"}` → `kind="turn_end"`
+- [x] `{"event":"error","message":"..."}` → `kind="error"`
 
-- [ ] Same TDD pattern. Plus one test using `opencode_unknown_model.jsonl` asserting at least one error event.
+- [x] Same TDD pattern. Plus one test using `opencode_unknown_model.jsonl` asserting at least one error event.
 - [ ] Commit: `"add opencode stream normalizer"`
 
 ---

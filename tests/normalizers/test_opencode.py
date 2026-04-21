@@ -266,3 +266,14 @@ def test_opencode_fixture_end_is_last() -> None:
     """The last raw line in opencode.jsonl must be the 'end' event."""
     raws = _load("opencode.jsonl")
     assert raws[-1].get("event") == "end"
+
+
+def test_opencode_unknown_model_fixture_yields_error() -> None:
+    """opencode_unknown_model.jsonl (bad model name) must produce at least one kind='error' event."""
+    n = OpenCodeNormalizer()
+    events = []
+    for raw in _load("opencode_unknown_model.jsonl"):
+        events.extend(n.normalize(raw, role="builder"))
+    assert any(e.kind == "error" for e in events), (
+        "expected at least one error event from unknown-model fixture"
+    )
