@@ -183,7 +183,12 @@ class TestStreamErrorDictEvents:
             await _collect(chain, prompt="x")
 
     async def test_error_dict_with_data_message(self) -> None:
-        """Error message from data.message field is extracted."""
+        """Error dict with nested error.data.message structure triggers retry/failover.
+
+        The chain extracts the message from either error.message or
+        error.data.message and raises ProviderError, which is recoverable,
+        causing fallback to the next provider.
+        """
         prov_a = _SequentialProvider(
             "A",
             [{"type": "error", "error": {"data": {"message": "nested error msg"}}}],
@@ -196,6 +201,8 @@ class TestStreamErrorDictEvents:
         result = await _collect(chain, prompt="x")
         # After error on A, chain falls back to B
         assert result == ["ok"]
+        assert prov_a.calls == 1, "provider A must have been tried exactly once"
+        assert prov_b.calls == 1, "provider B must have been used as the fallback"
 
     async def test_error_dict_triggers_fallback_after_retries(self) -> None:
         """Stream error events are treated as ProviderError → retries then fallback."""

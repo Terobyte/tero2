@@ -253,8 +253,22 @@ class CLIProvider(BaseProvider):
                 await proc.stdin.wait_closed()
 
         assert proc.stdout is not None
-        async for event in self._stream_events(proc):
-            yield event
+        try:
+            async for event in self._stream_events(proc):
+                yield event
+        finally:
+            # If the consumer broke out of iteration early (cancellation, break,
+            # exception), _stream_events may not have reached proc.wait(). Force
+            # the subprocess to exit so we don't leak a zombie.
+            if proc.returncode is None:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+                try:
+                    await proc.wait()
+                except Exception:
+                    pass
 
 
 # Alias for backward compatibility and test imports.

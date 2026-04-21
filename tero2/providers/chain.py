@@ -116,11 +116,19 @@ class ProviderChain:
                                 and msg.get("type") == "error"
                             ):
                                 error_data = msg.get("error") or {}
-                                error_msg = (
-                                    error_data.get("message", "")
-                                    if isinstance(error_data, dict)
-                                    else str(error_data)
-                                ) or "stream error"
+                                if isinstance(error_data, dict):
+                                    nested = error_data.get("data")
+                                    error_msg = (
+                                        error_data.get("message")
+                                        or (
+                                            nested.get("message")
+                                            if isinstance(nested, dict)
+                                            else None
+                                        )
+                                        or "stream error"
+                                    )
+                                else:
+                                    error_msg = str(error_data) or "stream error"
                                 raise ProviderError(error_msg)
                             yielded_anything = True
                             yield msg
@@ -129,7 +137,8 @@ class ProviderChain:
                 except Exception as exc:
                     if not _is_recoverable_error(exc):
                         # Non-recoverable: hard-fail immediately, no retry.
-                        cb.record_failure()
+                        # Do NOT touch the circuit breaker — this is a
+                        # config/logic error, not a provider availability issue.
                         raise
                     if yielded_anything:
                         # Recoverable but partial stream already sent: hard-fail.

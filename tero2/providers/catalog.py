@@ -61,12 +61,12 @@ async def fetch_cli_models(
     free_only: bool = False,
     refresh: bool = False,
 ) -> list[ModelEntry]:
-    # Uses create_subprocess_exec (not shell=True) — no injection risk.
     cmd = [cli_name, "models"]
     if provider_filter:
         cmd.append(provider_filter)
     if refresh:
         cmd.append("--refresh")
+    proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -85,7 +85,23 @@ async def fetch_cli_models(
                 continue
             entries.append(ModelEntry(id=line, label=_humanize(line)))
         return entries
-    except (FileNotFoundError, asyncio.TimeoutError, RuntimeError) as e:
+    except FileNotFoundError as e:
+        log.warning("fetch_cli_models(%s) failed: %s — using static fallback", cli_name, e)
+        return STATIC_CATALOG.get(cli_name, [])
+    except asyncio.TimeoutError as e:
+        # Kill the subprocess that timed out so it doesn't linger as a zombie.
+        if proc is not None and proc.returncode is None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            try:
+                await proc.wait()
+            except Exception:
+                pass
+        log.warning("fetch_cli_models(%s) failed: %s — using static fallback", cli_name, e)
+        return STATIC_CATALOG.get(cli_name, [])
+    except RuntimeError as e:
         log.warning("fetch_cli_models(%s) failed: %s — using static fallback", cli_name, e)
         return STATIC_CATALOG.get(cli_name, [])
 

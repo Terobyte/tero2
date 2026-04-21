@@ -38,10 +38,29 @@ class ShellProvider(BaseProvider):
             stdout, stderr = await proc.communicate()
         except Exception:
             proc.terminate()
-            await proc.wait()
-            # proc.stdout / proc.stderr are asyncio.StreamReader objects which
-            # have no .close() method — the event loop closes their underlying
-            # _PipeReadTransport automatically once the process has exited.
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=0.2)
+            except asyncio.TimeoutError:
+                # Child ignored SIGTERM — escalate to SIGKILL so we don't hang.
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+                try:
+                    await proc.wait()
+                except Exception:
+                    pass
+            # asyncio StreamReaders expose no public .close(); their backing
+            # _PipeReadTransport is closed by the loop once the process exits.
+            # Touch the private transport to force FD release in long-running
+            # servers that would otherwise wait for GC.
+            for stream in (getattr(proc, "stdout", None), getattr(proc, "stderr", None)):
+                transport = getattr(stream, "_transport", None) if stream is not None else None
+                if transport is not None:
+                    try:
+                        transport.close()
+                    except Exception:
+                        pass
             raise
         if proc.returncode != 0:
             err_msg = stderr.decode(errors="replace").strip()

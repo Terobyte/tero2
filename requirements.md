@@ -1389,7 +1389,7 @@ async def run(self, **kwargs: Any) -> AsyncGenerator[Any, None]:
     raise RateLimitError("all providers in chain exhausted")
 ```
 
-- [x] **Run tests + commit**
+- [ ] **Run tests + commit**
 
 ```bash
 uv run pytest tests/test_chain_retry_policy.py -v

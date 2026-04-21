@@ -18,6 +18,7 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Literal
@@ -113,6 +114,9 @@ class StreamBus:
         self._subscribers: list[asyncio.Queue[StreamEvent]] = []
         self._max = max_queue_size
         self._loop: asyncio.AbstractEventLoop | None = None
+        # threading.Lock guards _subscribers so subscribe/unsubscribe cannot
+        # mutate the list while _publish_impl iterates it.
+        self._sub_lock = threading.Lock()
 
     # ── subscriber management ────────────────────────────────────────────────
 
@@ -120,21 +124,24 @@ class StreamBus:
         """Register a new consumer and return its dedicated queue.
 
         The caller owns the queue and must call ``unsubscribe()`` when done to
-        release the reference and stop receiving events.
+        release the reference and stop receiving events. Acquires the
+        subscriber lock to serialise list mutation against publish.
         """
         q: asyncio.Queue[StreamEvent] = asyncio.Queue(maxsize=self._max)
-        self._subscribers.append(q)
+        with self._sub_lock:
+            self._subscribers.append(q)
         return q
 
     def unsubscribe(self, q: asyncio.Queue[StreamEvent]) -> None:
-        """Remove a previously subscribed queue.
+        """Remove a previously subscribed queue. Acquires the subscriber lock.
 
         Silently does nothing if the queue is not currently registered.
         """
-        try:
-            self._subscribers.remove(q)
-        except ValueError:
-            pass
+        with self._sub_lock:
+            try:
+                self._subscribers.remove(q)
+            except ValueError:
+                pass
 
     # ── publishing ───────────────────────────────────────────────────────────
 
@@ -182,7 +189,9 @@ class StreamBus:
         Any exception from a single queue is swallowed so other subscribers
         are not affected.
         """
-        for q in self._subscribers:
+        with self._sub_lock:
+            subscribers = list(self._subscribers)
+        for q in subscribers:
             if q.full():
                 try:
                     q.get_nowait()  # drop oldest

@@ -11,6 +11,11 @@ import requests
 
 from tero2.config import TelegramConfig
 
+# Test-facing alias: NotifierConfig is the TelegramConfig shape the Notifier
+# consumes. Keep separate naming so call sites reading notifier.NotifierConfig
+# remain stable if the underlying dataclass ever moves.
+NotifierConfig = TelegramConfig
+
 log = logging.getLogger(__name__)
 
 TTS_SCRIPT: Path = Path(
@@ -53,7 +58,6 @@ class Notifier:
         if audio_path is None:
             return False
         try:
-
             def _upload() -> int:
                 with open(audio_path, "rb") as f:
                     resp = requests.post(
@@ -69,6 +73,13 @@ class Notifier:
         except Exception:
             log.warning("telegram voice send failed", exc_info=True)
             return False
+        finally:
+            # TTS file is disposable — delete it so repeated voice notifications
+            # don't accumulate ~50-200KB each on disk.
+            try:
+                Path(audio_path).unlink(missing_ok=True)
+            except OSError:
+                pass
 
     async def notify(self, text: str, level: NotifyLevel = NotifyLevel.PROGRESS) -> bool:
         try:

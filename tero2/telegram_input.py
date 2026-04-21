@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import requests
@@ -23,6 +24,19 @@ from tero2.project_init import _extract_project_name, init_project
 log = logging.getLogger(__name__)
 
 _BASE_URL = "https://api.telegram.org/bot{token}/{method}"
+
+
+@dataclass
+class TelegramConfig:
+    """Minimal telegram-bot config consumed by TelegramInput.
+
+    Accepts both this flat shape and the richer tero2.config.TelegramConfig —
+    _poll_once pulls the token via getattr so either works.
+    """
+
+    bot_token: str = ""
+    chat_id: str = ""
+    allowed_ids: list[str] = field(default_factory=list)
 
 
 class TelegramInputBot:
@@ -83,13 +97,21 @@ class TelegramInputBot:
 
     async def _poll_once(self, offset: int) -> tuple[list[dict], int]:
         """One getUpdates call. Returns (updates, new_offset)."""
-        url = _BASE_URL.format(token=self.config.telegram.bot_token, method="getUpdates")
+        # Support both Config (has .telegram) and TelegramConfig (flat fields).
+        tg = getattr(self.config, "telegram", self.config)
+        url = _BASE_URL.format(token=tg.bot_token, method="getUpdates")
         resp = await asyncio.to_thread(
             requests.post,
             url,
             json={"offset": offset, "timeout": 30},
             timeout=35,  # slightly longer than long-poll timeout
         )
+        # HTTP-level failures (429 rate-limit, 5xx) can carry valid JSON; treat
+        # those as poll failures rather than processing the error body as data.
+        status_code = getattr(resp, "status_code", 200)
+        if status_code != 200:
+            log.warning("poll_once: HTTP %s, skipping", status_code)
+            return [], offset
         try:
             data = resp.json()
         except Exception:
@@ -274,7 +296,20 @@ class TelegramInputBot:
                 log.error(msg)
                 await self.notifier.send(msg, NotifyLevel.ERROR)
         except asyncio.TimeoutError:
-            pass
+            # Subprocess is still running past the startup window. If we leave
+            # proc.stderr untouched, its pipe buffer will eventually fill and
+            # the child will block on write. Spawn a background drain task so
+            # the child can keep producing output.
+            if proc.stderr is not None:
+                async def _drain_stderr() -> None:
+                    try:
+                        while True:
+                            chunk = await proc.stderr.read(4096)
+                            if not chunk:
+                                break
+                    except Exception:
+                        pass
+                asyncio.create_task(_drain_stderr())
 
     def _is_allowed(self, chat_id: str) -> bool:
         """Check if chat_id is in the allowed list."""

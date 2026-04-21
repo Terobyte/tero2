@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import ClassVar
 
@@ -100,16 +99,30 @@ class ProvidersPickScreen(ModalScreen[bool]):
         return True
 
     def _write_project_config(self) -> None:
+        import fcntl
+        import os
+        from tero2.config_writer import _load_toml, _serialize_toml
+
         config_path = self._project_path / _SORA_CONFIG_PATH
         config_path.parent.mkdir(parents=True, exist_ok=True)
+        # Atomic batch write: merge every role into existing TOML once, emit to
+        # a unique (PID-scoped) tmp path, and rename over config_path. A
+        # sibling lock file is held via fcntl.flock for the entire cycle so
+        # concurrent writers serialise instead of trampling each other's tmp.
+        lock_path = config_path.with_suffix(".lock")
+        lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
         tmp_path = config_path.with_suffix(f".{os.getpid()}.tmp")
         try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            existing = _load_toml(config_path)
+            roles_section = existing.setdefault("roles", {})
             for role_id, (provider, model) in self._roles.items():
-                write_global_config_section(config_path, f"roles.{role_id}", {
-                    "provider": provider,
-                    "model": model,
-                })
+                roles_section[role_id] = {"provider": provider, "model": model}
+            tmp_path.write_text(_serialize_toml(existing), encoding="utf-8")
+            tmp_path.replace(config_path)
         finally:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            os.close(lock_fd)
             if tmp_path.exists():
                 tmp_path.unlink(missing_ok=True)
 

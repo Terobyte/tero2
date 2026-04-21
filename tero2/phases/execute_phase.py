@@ -259,6 +259,8 @@ async def run_execute(
                     )
                 if esc_action.level == EscalationLevel.DIVERSIFICATION:
                     ctx.div_steps += 1
+                elif esc_action.level == EscalationLevel.BACKTRACK_COACH:
+                    ctx.div_steps = 0
 
             reflexion_section = reflexion_ctx.to_prompt()
             if esc_action.inject_prompt:

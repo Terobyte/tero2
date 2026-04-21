@@ -32,6 +32,7 @@ Command kinds (consumers send):
 from __future__ import annotations
 
 import asyncio
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -108,16 +109,20 @@ class EventDispatcher:
 
     def __init__(self) -> None:
         self._subscribers: list[asyncio.Queue[Event]] = []
-        self._emit_lock = asyncio.Lock()
+        # threading.Lock guards _subscribers so concurrent subscribe/unsubscribe
+        # from worker threads cannot mutate the list while emit() iterates it.
+        self._emit_lock = threading.Lock()
 
     def subscribe(self) -> asyncio.Queue[Event]:
         """Register a new consumer and return its dedicated event queue.
 
         The returned queue has maxsize=500. The caller owns the queue and
         should call unsubscribe() when done to release the reference.
+        Acquires _emit_lock to serialise list mutation against emit().
         """
         q: asyncio.Queue[Event] = asyncio.Queue(maxsize=500)
-        self._subscribers.append(q)
+        with self._emit_lock:
+            self._subscribers.append(q)
         return q
 
     def unsubscribe(self, q: asyncio.Queue[Event]) -> None:
@@ -125,16 +130,18 @@ class EventDispatcher:
 
         Drains any pending events so the queue releases references to event
         data immediately. Silently does nothing if the queue is not subscribed.
+        Acquires _emit_lock to serialise list mutation against emit().
         """
         while True:
             try:
                 q.get_nowait()
             except asyncio.QueueEmpty:
                 break
-        try:
-            self._subscribers.remove(q)
-        except ValueError:
-            pass
+        with self._emit_lock:
+            try:
+                self._subscribers.remove(q)
+            except ValueError:
+                pass
 
     async def emit(self, event: Event) -> None:
         """Copy event to all subscriber queues.
@@ -151,7 +158,7 @@ class EventDispatcher:
 
         Never blocks the Runner.
         """
-        async with self._emit_lock:
+        with self._emit_lock:
             for q in self._subscribers:
                 if not q.full():
                     # Fast path: there is room; put_nowait handles _unfinished_tasks

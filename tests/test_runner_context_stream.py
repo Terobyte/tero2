@@ -8,6 +8,12 @@ Covers:
   Step 5 — TOOL_REPEAT stuck signal aborts early with (False, partial)
   Step 6 — max_steps_per_task threshold aborts run with (False, partial)
   Step 7 — TimeoutError returns (False, partial) without re-raising
+  (stream_bus) Step A — stream_bus field defaults to None
+  (stream_bus) Step B — stream_bus field accepts a StreamBus instance
+  (stream_bus) Step C — run_agent publishes text events to bus
+  (stream_bus) Step D — run_agent publishes turn_end events to bus
+  (stream_bus) Step E — run_agent publishes tool_use events to bus
+  (stream_bus) Step F — run_agent with no bus does not crash
   Step 8 — RateLimitError returns (False, partial) without re-raising
   Step 9 — Heartbeat task is cancelled even on failure paths
 """
@@ -370,3 +376,211 @@ class TestRunAgentRoleTimeout:
         # Should not raise — HARD_TIMEOUT_S is used as the fallback
         ok, _ = await ctx.run_agent(chain, "prompt", role="nonexistent_role")
         assert ok is True
+
+
+# ── (stream_bus) Step A-B: RunnerContext.stream_bus field ─────────────────────
+
+
+class TestRunnerContextStreamBusField:
+    def test_default_stream_bus_is_none(self) -> None:
+        """RunnerContext() with no arguments must set stream_bus to None."""
+        from tero2.phases.context import RunnerContext
+
+        ctx = RunnerContext()
+        assert ctx.stream_bus is None
+
+    def test_accepts_stream_bus_instance(self) -> None:
+        """RunnerContext accepts a StreamBus and stores it on stream_bus."""
+        from tero2.phases.context import RunnerContext
+        from tero2.stream_bus import StreamBus
+
+        bus = StreamBus()
+        ctx = RunnerContext(stream_bus=bus)
+        assert ctx.stream_bus is bus
+
+    def test_stream_bus_field_is_independent_per_instance(self) -> None:
+        """Two RunnerContext instances must not share the same stream_bus object."""
+        from tero2.phases.context import RunnerContext
+        from tero2.stream_bus import StreamBus
+
+        bus1 = StreamBus()
+        bus2 = StreamBus()
+        ctx1 = RunnerContext(stream_bus=bus1)
+        ctx2 = RunnerContext(stream_bus=bus2)
+        assert ctx1.stream_bus is not ctx2.stream_bus
+
+
+# ── (stream_bus) Steps C-F: run_agent publishes events to bus ─────────────────
+
+
+class _FakeChainWithKind:
+    """Fake ProviderChain that yields a scripted message sequence.
+
+    ``current_provider_index`` is exposed as a plain attribute (not a property)
+    so that run_agent's ``chain.current_provider_index`` lookup works without a
+    real ProviderChain.
+    """
+
+    current_provider_index: int = 0
+
+    def __init__(self, kind: str, messages: list) -> None:
+        self.provider_kind = kind
+        self._messages = messages
+
+    async def run_prompt(self, prompt: str):
+        for msg in self._messages:
+            yield msg
+
+
+class TestRunAgentPublishesToBus:
+    async def test_text_event_published_to_bus(self, tmp_path: Path) -> None:
+        """run_agent with stream_bus must publish a 'text' event for plain-text output."""
+        from tero2.phases.context import RunnerContext
+        from tero2.stream_bus import StreamBus
+
+        bus = StreamBus()
+        q = bus.subscribe()
+        ctx = RunnerContext(stream_bus=bus)
+        chain = _FakeChainWithKind("claude", [
+            {"type": "assistant", "message": {"content": [
+                {"type": "text", "text": "hello from agent"},
+            ]}},
+            {"type": "result", "subtype": "success"},
+        ])
+        ok, output = await ctx.run_agent(chain, "do something", role="executor")
+        assert ok is True
+        kinds = []
+        while not q.empty():
+            kinds.append(q.get_nowait().kind)
+        assert "text" in kinds
+
+    async def test_turn_end_event_published_to_bus(self, tmp_path: Path) -> None:
+        """run_agent must publish a 'turn_end' event when the stream ends."""
+        from tero2.phases.context import RunnerContext
+        from tero2.stream_bus import StreamBus
+
+        bus = StreamBus()
+        q = bus.subscribe()
+        ctx = RunnerContext(stream_bus=bus)
+        chain = _FakeChainWithKind("claude", [
+            {"type": "result", "subtype": "success"},
+        ])
+        await ctx.run_agent(chain, "hi", role="executor")
+        kinds = []
+        while not q.empty():
+            kinds.append(q.get_nowait().kind)
+        assert "turn_end" in kinds
+
+    async def test_tool_use_event_published_to_bus(self, tmp_path: Path) -> None:
+        """run_agent must publish a 'tool_use' event for tool-use messages."""
+        from tero2.phases.context import RunnerContext
+        from tero2.stream_bus import StreamBus
+
+        bus = StreamBus()
+        q = bus.subscribe()
+        ctx = RunnerContext(stream_bus=bus)
+        chain = _FakeChainWithKind("claude", [
+            {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": "tu1", "name": "Read",
+                 "input": {"path": "main.py"}},
+            ]}},
+            {"type": "result", "subtype": "success"},
+        ])
+        await ctx.run_agent(chain, "read the file", role="executor")
+        events = []
+        while not q.empty():
+            events.append(q.get_nowait())
+        tool_use_events = [e for e in events if e.kind == "tool_use"]
+        assert len(tool_use_events) == 1
+        assert tool_use_events[0].tool_name == "Read"
+
+    async def test_no_bus_does_not_crash(self, tmp_path: Path) -> None:
+        """run_agent with stream_bus=None (default) must complete without error."""
+        ctx = _make_ctx(tmp_path)
+        assert ctx.stream_bus is None
+        chain = _FakeChain([
+            {"type": "text", "text": "works fine"},
+            {"type": "turn_end"},
+        ])
+        ok, output = await ctx.run_agent(chain, "prompt")
+        assert ok is True
+
+    async def test_role_attached_to_published_events(self, tmp_path: Path) -> None:
+        """All events published by run_agent must carry the role kwarg."""
+        from tero2.phases.context import RunnerContext
+        from tero2.stream_bus import StreamBus
+
+        bus = StreamBus()
+        q = bus.subscribe()
+        ctx = RunnerContext(stream_bus=bus)
+        chain = _FakeChainWithKind("claude", [
+            {"type": "assistant", "message": {"content": [
+                {"type": "text", "text": "event with role"},
+            ]}},
+            {"type": "result", "subtype": "success"},
+        ])
+        await ctx.run_agent(chain, "hi", role="builder")
+        events = []
+        while not q.empty():
+            events.append(q.get_nowait())
+        assert events, "run_agent must have published at least one event to the bus"
+        assert all(e.role == "builder" for e in events)
+
+
+# ── Task 25: nested Claude message + non-dict ZAI message ────────────────────
+
+
+async def test_run_agent_publishes_to_bus_nested_claude_message() -> None:
+    """run_agent must publish events for a nested Claude assistant message.
+
+    The Claude provider yields messages shaped like:
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "..."}]}}
+    followed by {"type": "result", "subtype": "success"}.
+
+    Per-message normalizers (not dict-only logic) must handle this shape and
+    publish at least a 'text' event and a 'turn_end' event to the bus.
+    """
+    from tero2.phases.context import RunnerContext
+    from tero2.stream_bus import StreamBus
+
+    bus = StreamBus()
+    q = bus.subscribe()
+    ctx = RunnerContext(stream_bus=bus)
+    chain = _FakeChainWithKind("claude", [
+        {
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "hello"}]},
+        },
+        {"type": "result", "subtype": "success"},
+    ])
+    success, output = await ctx.run_agent(chain, "hi", role="executor")
+    assert success
+    assert "hello" in output
+    kinds = []
+    while not q.empty():
+        kinds.append(q.get_nowait().kind)
+    assert "text" in kinds
+    assert "turn_end" in kinds
+
+
+async def test_run_agent_handles_non_dict_msg() -> None:
+    """run_agent must publish events for a non-dict ZAI provider message.
+
+    ZaiProvider yields objects (not dicts).  run_agent must NOT guard event
+    publishing with isinstance(message, dict) — it must use per-message
+    normalizers so object-shaped messages still reach the bus.
+    """
+    from tero2.phases.context import RunnerContext
+    from tero2.stream_bus import StreamBus
+
+    bus = StreamBus()
+    q = bus.subscribe()
+    ctx = RunnerContext(stream_bus=bus)
+
+    class _FakeMsg:
+        type = "text"
+        text = "hi from zai"
+
+    chain = _FakeChainWithKind("zai", [_FakeMsg()])
+    await ctx.run_agent(chain, "hi", role="executor")
+    assert not q.empty()  # at least one event published

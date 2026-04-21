@@ -190,7 +190,7 @@ class AgentState:
         tmp.write_text(self.to_json(), encoding="utf-8")
         try:
             os.replace(tmp, path)
-        except:
+        except OSError:
             tmp.unlink(missing_ok=True)
             raise
         # Remember the last save path so touch() can persist without a path arg.
