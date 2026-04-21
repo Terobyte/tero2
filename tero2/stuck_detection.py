@@ -64,7 +64,7 @@ def check_stuck(state: AgentState, config: StuckDetectionConfig) -> StuckResult:
         state.tool_hash_updated        # must have had at least one update_tool_hash call
         and state.tool_repeat_count > 0
         and config.tool_repeat_threshold > 0
-        and state.tool_repeat_count >= config.tool_repeat_threshold - 1
+        and state.tool_repeat_count >= config.tool_repeat_threshold
     ):
         return StuckResult(
             signal=StuckSignal.TOOL_REPEAT,

@@ -76,7 +76,7 @@ def build_reflexion_context(
     for a in attempts:
         output = a.builder_output
         if len(output) > MAX_BUILDER_OUTPUT_CHARS:
-            output = output.encode("utf-8")[:MAX_BUILDER_OUTPUT_CHARS].decode("utf-8", errors="replace") + "... [truncated]"
+            output = output[:MAX_BUILDER_OUTPUT_CHARS] + "... [truncated]"
         truncated.append(
             ReflexionAttempt(
                 attempt_number=a.attempt_number,

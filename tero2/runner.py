@@ -424,9 +424,7 @@ class Runner:
                 return
 
             truncated_output = (
-                captured_output.encode("utf-8")[:MAX_BUILDER_OUTPUT_CHARS]
-                .decode("utf-8", errors="ignore")
-                + "... [truncated]"
+                captured_output[:MAX_BUILDER_OUTPUT_CHARS] + "... [truncated]"
                 if len(captured_output) > MAX_BUILDER_OUTPUT_CHARS
                 else captured_output
             )
@@ -749,13 +747,9 @@ class Runner:
 
     def _handle_override(self, content: str, state: AgentState) -> AgentState:
         if self._RE_STOP.search(content):
-            new_state = self.checkpoint.mark_failed(state, "STOP directive in OVERRIDE.md")
-            object.__setattr__(state, "phase", new_state.phase)
-            self._current_state = new_state
-            return new_state
+            self._current_state = self.checkpoint.mark_failed(state, "STOP directive in OVERRIDE.md")
+            return self._current_state
         if self._RE_PAUSE.search(content) and state.phase != Phase.PAUSED:
-            new_state = self.checkpoint.mark_paused(state, "PAUSE directive in OVERRIDE.md")
-            object.__setattr__(state, "phase", new_state.phase)
-            self._current_state = new_state
-            return new_state
+            self._current_state = self.checkpoint.mark_paused(state, "PAUSE directive in OVERRIDE.md")
+            return self._current_state
         return state

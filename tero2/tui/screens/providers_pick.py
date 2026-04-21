@@ -54,6 +54,7 @@ class ProvidersPickScreen(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         yield Static(
             f"tero2 — провайдеры для нового проекта {self._project_path.name}",
+            id="pp-title",
             classes="screen-title",
         )
         items = []
