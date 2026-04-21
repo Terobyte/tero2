@@ -1133,7 +1133,7 @@ def test_base_provider_default_kind_is_empty():
 
 Set `self._kind = name` in `CLIProvider.__init__`, `self._kind = "zai"` in `ZaiProvider.__init__`, `self._kind = "shell"` in `ShellProvider.__init__`.
 
-- [ ] **Run tests + commit**
+- [x] **Run tests + commit**
 
 ```bash
 uv run pytest tests/test_provider_kind.py -v
@@ -1151,7 +1151,7 @@ git commit -m "add provider kind attribute for normalizer dispatch"
 
 **Files:** `tero2/providers/chain.py`, `tests/test_chain_provider_kind.py`
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```python
 # tests/test_chain_provider_kind.py
@@ -1188,7 +1188,7 @@ def test_provider_kind_empty_when_no_providers():
     assert chain.provider_kind == ""
 ```
 
-- [ ] **Step 2:** Add to `ProviderChain`:
+- [x] **Step 2:** Add to `ProviderChain`:
 
 ```python
     @property
@@ -1205,7 +1205,7 @@ def test_provider_kind_empty_when_no_providers():
         return getattr(self.providers[idx], "kind", "")
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tero2/providers/chain.py tests/test_chain_provider_kind.py
@@ -1219,13 +1219,13 @@ git commit -m "add ProviderChain.provider_kind property"
 **Files:** `tero2/providers/chain.py`, `tests/test_chain_retry_policy.py`
 
 Rules (spec §Decisions Log #8):
-- [ ] Recoverable errors BEFORE first yield → retry this provider, then fail over.
-- [ ] Recoverable errors AFTER first yield → hard fail.
-- [ ] Non-recoverable errors → hard fail always.
-- [ ] First message of shape `{"type":"error",...}` → treat as pre-yield stream error, raise `ProviderError`.
-- [ ] Mid-stream `{"type":"error"}` dict → pass through unchanged (normalizer handles).
+- [x] Recoverable errors BEFORE first yield → retry this provider, then fail over.
+- [x] Recoverable errors AFTER first yield → hard fail.
+- [x] Non-recoverable errors → hard fail always.
+- [x] First message of shape `{"type":"error",...}` → treat as pre-yield stream error, raise `ProviderError`.
+- [x] Mid-stream `{"type":"error"}` dict → pass through unchanged (normalizer handles).
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 ```python
 # tests/test_chain_retry_policy.py
@@ -1341,9 +1341,9 @@ def test_non_recoverable_raises_without_retry():
     asyncio.run(scenario())
 ```
 
-- [ ] **Step 2:** Run → expect 3+ failures against current chain.
+- [x] **Step 2:** Run → expect 3+ failures against current chain.
 
-- [ ] **Step 3:** Rewrite `ProviderChain.run`:
+- [x] **Step 3:** Rewrite `ProviderChain.run`:
 
 ```python
 async def run(self, **kwargs: Any) -> AsyncGenerator[Any, None]:
@@ -1389,7 +1389,7 @@ async def run(self, **kwargs: Any) -> AsyncGenerator[Any, None]:
     raise RateLimitError("all providers in chain exhausted")
 ```
 
-- [ ] **Run tests + commit**
+- [x] **Run tests + commit**
 
 ```bash
 uv run pytest tests/test_chain_retry_policy.py -v

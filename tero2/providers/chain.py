@@ -68,6 +68,19 @@ class ProviderChain:
     def current_provider_index(self) -> int:
         return self._current_provider_index
 
+    @property
+    def provider_kind(self) -> str:
+        """Canonical provider_kind of the currently-active provider.
+
+        Used by ``BasePlayer._run_prompt`` and ``RunnerContext.run_agent``
+        to dispatch to the correct stream normalizer. Failover updates
+        ``_current_provider_index`` so this tracks live.
+        """
+        if not self.providers:
+            return ""
+        idx = min(self._current_provider_index, len(self.providers) - 1)
+        return getattr(self.providers[idx], "kind", "")
+
     async def run(self, **kwargs: Any) -> AsyncGenerator[Any, None]:
         any_attempted = False
         for idx, provider in enumerate(self.providers):
@@ -79,8 +92,6 @@ class ProviderChain:
 
             # Per-provider retry loop: attempt 0 = initial call,
             # attempts 1..rate_limit_max_retries = backoff retries.
-            # Circuit breaker records exactly ONE failure when ALL retries are
-            # exhausted, not per-attempt — so retries are transparent to the CB.
             for attempt in range(self._rate_limit_max_retries + 1):
                 if attempt > 0:
                     wait = min(
@@ -90,30 +101,46 @@ class ProviderChain:
                     jitter = random.uniform(0, self._rate_limit_wait_s * 0.1)
                     await asyncio.sleep(wait + jitter)
 
+                # Track whether we have yielded any message to the caller.
+                # Error before first yield → retry/failover (safe, nothing sent yet).
+                # Error after first yield → hard-fail (can't retry a partial stream).
+                yielded_anything = False
                 try:
-                    messages: list[Any] = []
                     async with aclosing(provider.run(**kwargs)) as stream:
                         async for msg in stream:
-                            if isinstance(msg, dict) and msg.get("type") == "error":
-                                error_data = msg.get("error", {})
+                            # First message is an error-dict → treat as pre-yield
+                            # stream failure so the retry/failover path applies.
+                            if (
+                                not yielded_anything
+                                and isinstance(msg, dict)
+                                and msg.get("type") == "error"
+                            ):
+                                error_data = msg.get("error") or {}
                                 error_msg = (
                                     error_data.get("message", "")
-                                    or (error_data.get("data") or {}).get("message", "")
-                                    or str(error_data)
-                                )
-                                raise ProviderError(error_msg or "stream error event")
-                            messages.append(msg)
+                                    if isinstance(error_data, dict)
+                                    else str(error_data)
+                                ) or "stream error"
+                                raise ProviderError(error_msg)
+                            yielded_anything = True
+                            yield msg
                     cb.record_success()
-                    for msg in messages:
-                        yield msg
                     return
                 except Exception as exc:
                     if not _is_recoverable_error(exc):
+                        # Non-recoverable: hard-fail immediately, no retry.
+                        cb.record_failure()
                         raise
-                    # Inner loop continues to next attempt.
-            else:
-                # All retries for this provider exhausted — count as one CB failure.
-                cb.record_failure()
+                    if yielded_anything:
+                        # Recoverable but partial stream already sent: hard-fail.
+                        cb.record_failure()
+                        raise
+                    # Recoverable and nothing yielded yet: retry this provider.
+                    if attempt >= self._rate_limit_max_retries:
+                        # Exhausted retries for this provider — record failure,
+                        # then try next provider in the outer loop.
+                        cb.record_failure()
+                        break
 
         if not any_attempted:
             raise CircuitOpenError("all providers circuit-broken")

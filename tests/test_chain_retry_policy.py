@@ -10,6 +10,7 @@ This file focuses on:
 - run_prompt() delegates correctly to run()
 - An empty provider list raises immediately
 - Provider skipped silently when circuit is open (is_available=False)
+- Yield-aware retry policy: errors before first yield retry; errors after hard-fail
 """
 
 from __future__ import annotations
@@ -369,3 +370,118 @@ class TestCircuitOpenSkip:
         chain = ProviderChain([prov_a, prov_b], cb_registry=cb_registry)
         with pytest.raises(CircuitOpenError, match="all providers circuit-broken"):
             await _collect(chain, prompt="x")
+
+
+# ── yield-aware retry policy ──────────────────────────────────────────────────
+
+
+class _ScriptedProvider(BaseProvider):
+    """Yields items from a script; optionally raises at a given index.
+
+    ``raise_at`` is the loop iteration at which the error fires:
+    - raise_at=0: raises before yielding any item (pre-yield).
+    - raise_at=N (N > 0): yields N items, then raises.
+    - raise_at >= len(script): yields all items, then raises after the loop.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        script: list[Any],
+        raise_at: int | None = None,
+        raise_exc: Exception | None = None,
+    ) -> None:
+        self._name = name
+        self._script = script
+        self._raise_at = raise_at
+        self._raise_exc = raise_exc or RateLimitError("scripted")
+        self.calls = 0
+
+    @property
+    def display_name(self) -> str:
+        return self._name
+
+    async def run(self, **kwargs: Any):
+        self.calls += 1
+        for i, item in enumerate(self._script):
+            if self._raise_at is not None and i == self._raise_at:
+                raise self._raise_exc
+            yield item
+        # Raise after the loop when raise_at targets a position beyond the script.
+        if self._raise_at is not None and self._raise_at >= len(self._script):
+            raise self._raise_exc
+
+
+def _scripted_chain(*providers: BaseProvider, retries: int = 2) -> ProviderChain:
+    return ProviderChain(
+        list(providers),
+        cb_registry=CircuitBreakerRegistry(),
+        rate_limit_max_retries=retries,
+        rate_limit_wait_s=0.0,
+    )
+
+
+class TestYieldAwareRetryPolicy:
+    async def test_retry_before_first_yield_succeeds(self) -> None:
+        """Error before any yield is pre-yield → retry/failover allowed."""
+        failing = _ScriptedProvider(
+            "a",
+            [{"type": "text", "text": "x"}],
+            raise_at=0,
+            raise_exc=RateLimitError("rl"),
+        )
+        good = _ScriptedProvider("b", [{"type": "text", "text": "ok"}])
+        chain = _scripted_chain(failing, good, retries=1)
+
+        with patch("tero2.providers.chain.asyncio.sleep", AsyncMock()):
+            out = await _collect(chain, prompt="hi")
+
+        assert out == [{"type": "text", "text": "ok"}]
+        assert good.calls == 1
+
+    async def test_error_after_first_yield_is_hard_fail(self) -> None:
+        """Recoverable error AFTER first yield must hard-fail — no retry, no fallback."""
+        mid_fail = _ScriptedProvider(
+            "a",
+            [{"type": "text", "text": "partial"}],
+            raise_at=1,
+            raise_exc=RateLimitError("mid"),
+        )
+        good = _ScriptedProvider("b", [{"type": "text", "text": "ok"}])
+        chain = _scripted_chain(mid_fail, good, retries=3)
+
+        with pytest.raises(RateLimitError):
+            await _collect(chain, prompt="hi")
+
+        assert good.calls == 0, "fallback must not be tried after post-yield error"
+
+    async def test_first_msg_error_dict_triggers_retry(self) -> None:
+        """An error-dict as the very first message is treated as pre-yield → retry/failover."""
+        error_first = _ScriptedProvider(
+            "a", [{"type": "error", "error": {"message": "rate limit"}}]
+        )
+        good = _ScriptedProvider("b", [{"type": "text", "text": "ok"}])
+        chain = _scripted_chain(error_first, good, retries=1)
+
+        with patch("tero2.providers.chain.asyncio.sleep", AsyncMock()):
+            out = await _collect(chain, prompt="hi")
+
+        assert out == [{"type": "text", "text": "ok"}]
+        assert good.calls == 1
+
+    async def test_mid_stream_error_dict_passes_through(self) -> None:
+        """An error-dict that arrives AFTER normal messages is yielded as-is (normalizer handles)."""
+        mixed = _ScriptedProvider(
+            "a",
+            [
+                {"type": "text", "text": "hello"},
+                {"type": "error", "error": {"message": "oops"}},
+            ],
+        )
+        chain = _scripted_chain(mixed, retries=0)
+        out = await _collect(chain, prompt="hi")
+
+        assert out == [
+            {"type": "text", "text": "hello"},
+            {"type": "error", "error": {"message": "oops"}},
+        ]
