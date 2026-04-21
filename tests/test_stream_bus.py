@@ -8,14 +8,14 @@ Coverage:
 - Unsubscribed queues no longer receive events
 - Dead/failing subscriber tolerance (one bad queue must not poison others)
 - publish() no-op when no running loop
+- publish() from worker thread after asyncio.run() restart (stale loop guard)
 """
 
 from __future__ import annotations
 
 import asyncio
+import threading
 from datetime import datetime, timezone
-
-import pytest
 
 from tero2.stream_bus import StreamBus, StreamEvent, make_stream_event
 
@@ -326,3 +326,111 @@ class TestDeadSubscriberTolerance:
 
         received = [good_q.get_nowait() for _ in range(good_q.qsize())]
         assert received == events
+
+
+# ── StreamBus — stale loop guard (worker-thread after asyncio.run() restart) ──
+
+
+class TestStaleLoopGuard:
+    def test_worker_thread_publish_after_loop_restart_does_not_raise(self) -> None:
+        """publish() from a plain thread must not raise RuntimeError when the
+        cached event loop was closed by a previous asyncio.run() call.
+
+        Reproducer from review feedback:
+        1. Run asyncio.run() once — StreamBus captures that loop.
+        2. asyncio.run() exits, closing that loop.
+        3. A second thread calls publish() — previously raised
+           ``RuntimeError: Event loop is closed`` inside call_soon_threadsafe.
+        """
+        bus = StreamBus()
+
+        # First asyncio.run() — lets the bus capture its loop.
+        async def first_run() -> None:
+            bus.subscribe()
+            bus.publish(_ev(content="first"))
+
+        asyncio.run(first_run())
+        # The loop captured by `bus._loop` is now closed.
+        assert bus._loop is not None
+        assert bus._loop.is_closed()
+
+        # Publish from a plain worker thread — must be silent (no RuntimeError).
+        errors: list[Exception] = []
+
+        def thread_publish() -> None:
+            try:
+                bus.publish(_ev(content="from thread after restart"))
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        t = threading.Thread(target=thread_publish, daemon=True)
+        t.start()
+        t.join(timeout=2.0)
+
+        assert not errors, f"publish() raised from worker thread: {errors}"
+
+    def test_worker_thread_publish_after_two_restarts_does_not_raise(self) -> None:
+        """Stale-loop guard holds across multiple asyncio.run() restarts."""
+        bus = StreamBus()
+
+        for _ in range(3):
+            asyncio.run(asyncio.sleep(0))
+
+        errors: list[Exception] = []
+
+        def thread_publish() -> None:
+            try:
+                bus.publish(_ev(content="thread"))
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        t = threading.Thread(target=thread_publish, daemon=True)
+        t.start()
+        t.join(timeout=2.0)
+
+        assert not errors, f"publish() raised: {errors}"
+
+
+# ── Additional spec-pinned tests (Task 3 from plan) ─────────────────────────
+
+
+class TestSpecPinned:
+    """Function-level test bodies from the live-agent-stream plan, Task 3.
+
+    These verify the same ring-buffer and fault-tolerance guarantees as the
+    class-based suites above, but express assertions in the plan's exact terms
+    (content strings, ordering) to prevent silent regressions.
+    """
+
+    async def test_ring_buffer_drops_oldest_content_sequence(self) -> None:
+        """Ring-buffer with size 3: publishing 5 events leaves content "2","3","4"."""
+        bus = StreamBus(max_queue_size=3)
+        q = bus.subscribe()
+        events = [make_stream_event("r", "text", content=str(i)) for i in range(5)]
+        for ev in events:
+            bus.publish(ev)
+        received = []
+        for _ in range(3):
+            received.append(await asyncio.wait_for(q.get(), timeout=0.05))
+        assert [e.content for e in received] == ["2", "3", "4"]
+
+    async def test_survives_subscriber_with_broken_queue(self) -> None:
+        """A subscriber whose put_nowait raises must not block good subscribers."""
+        bus = StreamBus(max_queue_size=3)
+        good = bus.subscribe()
+
+        class _BadQueue:
+            def full(self) -> bool:
+                return False
+
+            def put_nowait(self, item: object) -> None:
+                raise RuntimeError("boom")
+
+            def get_nowait(self) -> StreamEvent:
+                raise asyncio.QueueEmpty()
+
+        bus._subscribers.append(_BadQueue())  # type: ignore[arg-type]
+        ev = make_stream_event("r", "text", content="x")
+        bus.publish(ev)  # must not raise
+        received = await asyncio.wait_for(good.get(), timeout=0.05)
+        assert received is ev
