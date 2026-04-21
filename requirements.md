@@ -851,7 +851,7 @@ register("claude", ClaudeNormalizer())
 from tero2.providers.normalizers import claude  # noqa: F401,E402
 ```
 
-- [ ] **Step 4: Run tests and commit**
+- [x] **Step 4: Run tests and commit**
 
 ```bash
 uv run pytest tests/normalizers/test_claude.py -v
@@ -864,24 +864,24 @@ git commit -m "add claude stream normalizer"
 ### Task 7: `CodexNormalizer`
 
 **Files:**
-- [ ] Create: `tero2/providers/normalizers/codex.py`
-- [ ] Create: `tests/normalizers/test_codex.py`
+- [x] Create: `tero2/providers/normalizers/codex.py`
+- [x] Create: `tests/normalizers/test_codex.py`
 
 Inspect `tests/normalizers/fixtures/codex.jsonl` to confirm shape. Expected types: `text`, `tool`, `tool_output`, `done`, `error`.
 
 Mapping:
-- [ ] `{"type":"text","content":"..."}` → `kind="text"`
-- [ ] `{"type":"tool","name":"...","input":{...},"id":"..."}` → `kind="tool_use"`
-- [ ] `{"type":"tool_output","id":"...","output":"..."}` → `kind="tool_result"`
-- [ ] `{"type":"done"}` → `kind="turn_end"`
-- [ ] `{"type":"error","message":"..."}` → `kind="error"`
+- [x] `{"type":"text","content":"..."}` → `kind="text"`
+- [x] `{"type":"tool","name":"...","input":{...},"id":"..."}` → `kind="tool_use"`
+- [x] `{"type":"tool_output","id":"...","output":"..."}` → `kind="tool_result"`
+- [x] `{"type":"done"}` → `kind="turn_end"`
+- [x] `{"type":"error","message":"..."}` → `kind="error"`
 
 Follow same pattern as Task 6:
-- [ ] Tests first (kind-per-kind + golden + tool_error fixture)
-- [ ] Run → fail
-- [ ] Implement, `register("codex", CodexNormalizer())`, side-effect import
-- [ ] Re-run → pass
-- [ ] Commit: `"add codex stream normalizer"`
+- [x] Tests first (kind-per-kind + golden + tool_error fixture)
+- [x] Run → fail
+- [x] Implement, `register("codex", CodexNormalizer())`, side-effect import
+- [x] Re-run → pass
+- [x] Commit: `"add codex stream normalizer"`
 
 If fixture shape disagrees with the mapping, update the mapping and note actual shape in a one-line comment at the top of `codex.py`.
 
