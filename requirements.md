@@ -899,7 +899,7 @@ OpenCode `--format json` typically uses `event` key:
 - [x] `{"event":"error","message":"..."}` → `kind="error"`
 
 - [x] Same TDD pattern. Plus one test using `opencode_unknown_model.jsonl` asserting at least one error event.
-- [ ] Commit: `"add opencode stream normalizer"`
+- [x] Commit: `"add opencode stream normalizer"`
 
 ---
 
@@ -909,8 +909,8 @@ OpenCode `--format json` typically uses `event` key:
 
 Inspect `kilo.jsonl` fixture to finalize mapping (similar mechanics to OpenCode).
 
-- [ ] Same TDD pattern.
-- [ ] Commit: `"add kilo stream normalizer"`
+- [x] Same TDD pattern.
+- [x] Commit: `"add kilo stream normalizer"`
 
 ---
 
