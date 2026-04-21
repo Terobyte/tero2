@@ -1,0 +1,9 @@
+// Claude CLI auth error captured with ANTHROPIC_API_KEY=invalid-key-for-testing (claude 2.1.114)
+// Scenario: invalid API key → 401 authentication_failed error from the API
+// NOTE: real auth errors surface as assistant(text) + result(is_error=true, api_error_status=401),
+//       NOT as a bare {"type":"error",...} event like the synthetic claude_rate_limit.jsonl.
+// Hook events (system.subtype=hook_started/hook_response) filtered out.
+// The assistant message carries error="authentication_failed" at the top level.
+{"type":"system","subtype":"init","cwd":"/private/tmp/tero2_sandbox","session_id":"f585dba4-c850-40e7-ad81-042846459c81","tools":["Task","AskUserQuestion","Bash","CronCreate","CronDelete","CronList","Edit","EnterPlanMode","EnterWorktree","ExitPlanMode","ExitWorktree","Glob","Grep","LSP","Monitor","NotebookEdit","PushNotification","Read","RemoteTrigger","ScheduleWakeup","Skill","TaskOutput","TaskStop","TodoWrite","ToolSearch","WebFetch","WebSearch","Write"],"mcp_servers":[],"model":"claude-sonnet-4-6","permissionMode":"bypassPermissions","apiKeySource":"ANTHROPIC_API_KEY","claude_code_version":"2.1.114"}
+{"type":"assistant","message":{"id":"441cb9ad-ba13-44ca-8dde-f26cae738fc4","model":"<synthetic>","role":"assistant","stop_reason":"stop_sequence","type":"message","usage":{"input_tokens":0,"output_tokens":0},"content":[{"type":"text","text":"Invalid API key \u00b7 Fix external API key"}]},"parent_tool_use_id":null,"session_id":"f585dba4-c850-40e7-ad81-042846459c81","uuid":"89515545-938a-49be-9e68-0d20c821bf7f","error":"authentication_failed"}
+{"type":"result","subtype":"success","is_error":true,"api_error_status":401,"duration_ms":262,"duration_api_ms":0,"num_turns":1,"result":"Invalid API key \u00b7 Fix external API key","stop_reason":"stop_sequence","session_id":"f585dba4-c850-40e7-ad81-042846459c81","total_cost_usd":0,"usage":{"input_tokens":0,"output_tokens":0,"service_tier":"standard"}}

@@ -1,0 +1,6 @@
+// OpenCode CLI opencode run --format json captured output (synthetic negative fixture)
+// Scenario: bad model name specified → OpenCode reports "unknown model" error immediately.
+// OpenCode uses "event" as discriminator key and "message" for error text (not "error").
+// This fixture validates that kind="error" is produced for model-not-found failures.
+{"event": "error", "message": "unknown model: anthropic/claude-99-not-real"}
+{"event": "end"}

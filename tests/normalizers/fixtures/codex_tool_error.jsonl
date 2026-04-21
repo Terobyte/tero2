@@ -1,0 +1,13 @@
+// Codex CLI codex exec --json captured output (synthetic negative fixture)
+// Scenario: tool invocation reads a nonexistent file → shell error in tool_output.
+// Codex tool errors surface as tool_output lines whose "output" contains the
+// shell stderr text (e.g. "No such file or directory"), NOT as type=error.
+// This fixture validates that kind="tool_result" is produced even for failed tool runs.
+{"type": "text", "content": "I'll read the config file to check the current settings."}
+{"type": "tool", "name": "bash", "id": "call_Err001XYZ", "input": {"cmd": "cat /nonexistent/path/to/config.toml"}}
+{"type": "tool_output", "id": "call_Err001XYZ", "output": "cat: /nonexistent/path/to/config.toml: No such file or directory"}
+{"type": "text", "content": "The config file does not exist at that path. I'll check the project root instead."}
+{"type": "tool", "name": "bash", "id": "call_Err002XYZ", "input": {"cmd": "cat /nonexistent/project/settings.toml"}}
+{"type": "tool_output", "id": "call_Err002XYZ", "output": "cat: /nonexistent/project/settings.toml: No such file or directory"}
+{"type": "text", "content": "Neither location has the config file. Cannot complete the task without it."}
+{"type": "done"}

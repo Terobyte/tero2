@@ -1,0 +1,7 @@
+// OpenCode CLI `opencode run --format json --dir <dir> -` captured (opencode 1.4.0)
+// Scenario: default configured model is "mimo-v2-pro" (openrouter) which doesn't exist
+// → ProviderModelNotFoundError immediately, with error JSON on stdout
+// NOTE: opencode surfaces model errors as {"type":"error",...} before any step events.
+// The error is printed to both stderr (as a JS stack trace) and stdout (as JSON).
+// Only the stdout JSON line is captured here.
+{"type":"error","timestamp":1776770390278,"sessionID":"ses_2503b677bffevkASereLgXXWH3","error":{"name":"UnknownError","data":{"message":"Model not found: openrouter/mimo-v2-pro. Did you mean: xiaomi/mimo-v2-pro?"}}}

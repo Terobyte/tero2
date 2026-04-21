@@ -1,0 +1,13 @@
+// Codex CLI `codex exec --json --dangerously-bypass-approvals-and-sandbox -` captured from real CLI run (codex-cli 0.115.0)
+// Prompt: "read README.md and summarize in one sentence"
+// Sandbox: /tmp/tero2_sandbox/README.md  (3-line tero2 README)
+// NOTE: codex 0.115.0 uses item.completed/thread.started/turn.completed events
+//       (NOT the synthetic type=text/tool/tool_output/done events in codex.jsonl).
+// Event sequence: thread.started → turn.started → item(agent_message) → item(command_execution in_progress) → item(command_execution completed) → item(agent_message) → turn.completed
+{"type":"thread.started","thread_id":"019dafc3-4d18-7e92-81a3-01ce351acbd6"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I'm opening `README.md` now so I can give you a one-sentence summary."}}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc \"sed -n '1,220p' README.md\"","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc \"sed -n '1,220p' README.md\"","aggregated_output":"# tero2\n\nAutonomous agent orchestration system built on SORA architecture.\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"`README.md` says `tero2` is an autonomous agent orchestration system built on the SORA architecture."}}
+{"type":"turn.completed","usage":{"input_tokens":36378,"cached_input_tokens":23680,"output_tokens":256}}

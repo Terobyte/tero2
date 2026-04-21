@@ -246,3 +246,54 @@ def test_codex_fixture_done_is_last() -> None:
     """The last raw line in codex.jsonl must be the 'done' event."""
     raws = _load("codex.jsonl")
     assert raws[-1].get("type") == "done"
+
+
+# ── negative-path fixture: tool errors surfaced as tool_output ────────────────
+
+
+def test_codex_tool_error_fixture_produces_tool_results() -> None:
+    """Failed shell commands in codex_tool_error.jsonl must still produce tool_result events.
+
+    Codex surfaces tool errors as tool_output lines whose 'output' contains
+    stderr text.  They do NOT use type='error'.  The normalizer must emit
+    kind='tool_result' regardless of whether the shell command succeeded.
+    """
+    n = CodexNormalizer()
+    events = []
+    for raw in _load("codex_tool_error.jsonl"):
+        events.extend(n.normalize(raw, role="builder"))
+    result_events = [e for e in events if e.kind == "tool_result"]
+    assert len(result_events) >= 2, (
+        "fixture has two failed tool calls — expected at least 2 tool_result events"
+    )
+
+
+def test_codex_tool_error_fixture_preserves_stderr_text() -> None:
+    """tool_result events from failed runs must carry the stderr text verbatim."""
+    n = CodexNormalizer()
+    result_events = []
+    for raw in _load("codex_tool_error.jsonl"):
+        for ev in n.normalize(raw, role="builder"):
+            if ev.kind == "tool_result":
+                result_events.append(ev)
+    assert result_events, "no tool_result events in fixture"
+    stderr_text = "No such file or directory"
+    assert all(stderr_text in (ev.tool_output or "") for ev in result_events), (
+        "expected all tool_result events to contain the shell error text"
+    )
+
+
+def test_codex_tool_error_fixture_id_correlation() -> None:
+    """Every tool_result in the error fixture must have a tool_id matching a prior tool_use."""
+    n = CodexNormalizer()
+    tool_use_ids: set[str] = set()
+    result_ids: set[str] = set()
+    for raw in _load("codex_tool_error.jsonl"):
+        for ev in n.normalize(raw, role="builder"):
+            if ev.kind == "tool_use":
+                tool_use_ids.add(ev.tool_id)
+            elif ev.kind == "tool_result":
+                result_ids.add(ev.tool_id)
+    assert result_ids.issubset(tool_use_ids), (
+        f"tool_result IDs {result_ids - tool_use_ids} have no matching tool_use"
+    )

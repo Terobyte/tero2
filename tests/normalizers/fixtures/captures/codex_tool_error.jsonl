@@ -1,0 +1,12 @@
+// Codex CLI `codex exec --json --dangerously-bypass-approvals-and-sandbox -` captured (codex-cli 0.115.0)
+// Scenario: prompt asks to read /nonexistent/path/to/config.toml → shell error
+// NOTE: codex 0.115.0 surfaces tool errors as item.completed with exit_code=1 and
+//       aggregated_output containing the stderr text — NOT as type=error events.
+// Prompt: "read /nonexistent/path/to/config.toml and show its contents"
+{"type":"thread.started","thread_id":"019dafc6-7e0d-70f2-9b26-b633a20ed782"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I'm checking that path directly so we can confirm whether the file exists and, if it does, show its contents."}}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'cat /nonexistent/path/to/config.toml'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'cat /nonexistent/path/to/config.toml'","aggregated_output":"cat: /nonexistent/path/to/config.toml: No such file or directory\n","exit_code":1,"status":"failed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"`/nonexistent/path/to/config.toml` doesn't exist, so there aren't any contents to show.\n\nCommand result:\n```text\ncat: /nonexistent/path/to/config.toml: No such file or directory\n```"}}
+{"type":"turn.completed","usage":{"input_tokens":36410,"cached_input_tokens":21632,"output_tokens":321}}

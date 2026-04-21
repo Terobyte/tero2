@@ -578,20 +578,20 @@ git commit -m "add normalizer protocol, fallback, and dispatcher"
 ### Task 5: Collect provider fixtures (HUMAN one-off)
 
 **Files:**
-- [ ] Create: `tests/normalizers/fixtures/claude.jsonl`
-- [ ] Create: `tests/normalizers/fixtures/claude_rate_limit.jsonl`
-- [ ] Create: `tests/normalizers/fixtures/codex.jsonl`
-- [ ] Create: `tests/normalizers/fixtures/codex_tool_error.jsonl`
-- [ ] Create: `tests/normalizers/fixtures/opencode.jsonl`
-- [ ] Create: `tests/normalizers/fixtures/opencode_unknown_model.jsonl`
-- [ ] Create: `tests/normalizers/fixtures/kilo.jsonl`
-- [ ] Create: `tests/normalizers/fixtures/zai.jsonl`
+- [x] Create: `tests/normalizers/fixtures/claude.jsonl`
+- [x] Create: `tests/normalizers/fixtures/claude_rate_limit.jsonl`
+- [x] Create: `tests/normalizers/fixtures/codex.jsonl`
+- [x] Create: `tests/normalizers/fixtures/codex_tool_error.jsonl`
+- [x] Create: `tests/normalizers/fixtures/opencode.jsonl`
+- [x] Create: `tests/normalizers/fixtures/opencode_unknown_model.jsonl`
+- [x] Create: `tests/normalizers/fixtures/kilo.jsonl`
+- [x] Create: `tests/normalizers/fixtures/zai.jsonl`
 
-- [ ] **Step 1: Run each CLI** against `"read README.md and summarize in one sentence"` in a sandbox containing a tiny README, capture full raw stdout to `.jsonl`. Use the project's existing CLI invocations as a reference (`grep -n 'create_subprocess_exec' tero2/providers/cli.py`).
+- [x] **Step 1: Run each CLI** against `"read README.md and summarize in one sentence"` in a sandbox containing a tiny README, capture full raw stdout to `.jsonl`. Use the project's existing CLI invocations as a reference (`grep -n 'create_subprocess_exec' tero2/providers/cli.py`).
 
-- [ ] **Step 2: Capture negative fixtures** — invalid API key for rate_limit, read nonexistent file for tool_error, bad model name for opencode_unknown_model.
+- [x] **Step 2: Capture negative fixtures** — invalid API key for rate_limit, read nonexistent file for tool_error, bad model name for opencode_unknown_model.
 
-- [ ] **Step 3: Manual review** — confirm each `.jsonl` has valid JSON per line, no secrets leaked. Collectively covers: text, tool_use, tool_result, thinking, turn_end, error. Note capture date in `tests/normalizers/fixtures/README.md`.
+- [x] **Step 3: Manual review** — confirm each `.jsonl` has valid JSON per line, no secrets leaked. Collectively covers: text, tool_use, tool_result, thinking, turn_end, error. Note capture date in `tests/normalizers/fixtures/README.md`.
 
 - [ ] **Step 4: Commit**
 
