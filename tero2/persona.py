@@ -100,6 +100,17 @@ class Persona:
     metadata: dict[str, str] = field(default_factory=dict)
 
 
+_META_VALUE_MAX_LEN = 120
+_META_DANGEROUS_RE = re.compile(r"ignore\s+previous\s+instructions?", re.IGNORECASE)
+
+
+def _sanitize_meta_value(value: str) -> str:
+    """Sanitize a frontmatter metadata value against prompt injection."""
+    value = value[:_META_VALUE_MAX_LEN]
+    value = _META_DANGEROUS_RE.sub("[REDACTED]", value)
+    return value
+
+
 def _parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
     """Parse optional ``---`` frontmatter from *text*.
 
@@ -113,7 +124,7 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
     for line in m.group(1).splitlines():
         lm = _META_LINE_RE.match(line.strip())
         if lm:
-            meta[lm.group(1)] = lm.group(2).strip()
+            meta[lm.group(1)] = _sanitize_meta_value(lm.group(2).strip())
     return meta, m.group(2)
 
 

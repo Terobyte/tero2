@@ -69,6 +69,8 @@ _SORA_VALID_NEXT: dict[SoraPhase, frozenset[SoraPhase]] = {
     SoraPhase.COACH: frozenset({SoraPhase.COACH, SoraPhase.ARCHITECT}),
     SoraPhase.ARCHITECT: frozenset({SoraPhase.ARCHITECT, SoraPhase.EXECUTE}),
     SoraPhase.EXECUTE: frozenset({SoraPhase.EXECUTE, SoraPhase.SLICE_DONE}),
+    # SLICE_DONE → ARCHITECT: backward jump is safe here — re-plan for next slice
+    # after the current one completes (multi-slice pipeline retry loop).
     SoraPhase.SLICE_DONE: frozenset({SoraPhase.SLICE_DONE, SoraPhase.ARCHITECT}),
 }
 
@@ -81,6 +83,7 @@ class AgentState:
     steps_in_task: int = 0
     last_tool_hash: str = ""
     tool_repeat_count: int = 0        # consecutive same-hash count (stuck detection)
+    tool_hash_updated: bool = False   # True once update_tool_hash has been called
     last_checkpoint: str = ""
     provider_index: int = 0
     started_at: str = ""
@@ -94,10 +97,19 @@ class AgentState:
     task_in_progress: bool = False  # True between "before-task" and "after-task" checkpoint saves
 
     def __setattr__(self, name: str, value: object) -> None:
-        if name == "phase" and "phase" in self.__dict__:
+        if name == "phase":
             target: Phase = value  # type: ignore[assignment]
-            if target not in _PHASE_VALID_NEXT.get(self.phase, frozenset()):
-                raise StateTransitionError(self.phase.value, target.value)
+            if "phase" in self.__dict__:
+                # Subsequent assignment: validate the transition.
+                if target not in _PHASE_VALID_NEXT.get(self.phase, frozenset()):
+                    raise StateTransitionError(self.phase.value, target.value)
+            else:
+                # Initial assignment (dataclass __init__): only IDLE is a valid
+                # starting phase.  COMPLETED is a terminal state that cannot be
+                # reached without going through RUNNING first — coerce it so that
+                # follow-on transition checks still fire correctly (A10).
+                if target == Phase.COMPLETED:
+                    value = Phase.RUNNING
         elif name == "sora_phase" and "sora_phase" in self.__dict__:
             sp: SoraPhase = value  # type: ignore[assignment]
             if sp not in _SORA_VALID_NEXT.get(self.sora_phase, frozenset()):
@@ -147,7 +159,20 @@ class AgentState:
             d["sora_phase"] = SoraPhase.NONE
 
         try:
-            return cls(**{k: v for k, v in d.items() if k in known})
+            # Use object.__new__ + object.__setattr__ to bypass the phase-transition
+            # guard in __setattr__ — from_json must faithfully restore any terminal
+            # state (e.g. Phase.COMPLETED) that was persisted to disk.
+            import dataclasses
+            instance = object.__new__(cls)
+            for f in dataclasses.fields(cls):
+                val = d.get(f.name, dataclasses.MISSING)
+                if val is dataclasses.MISSING:
+                    if f.default is not dataclasses.MISSING:
+                        val = f.default
+                    elif f.default_factory is not dataclasses.MISSING:  # type: ignore[misc]
+                        val = f.default_factory()  # type: ignore[misc]
+                object.__setattr__(instance, f.name, val)
+            return instance
         except (TypeError, KeyError, AttributeError) as e:
             raise ValueError(f"AgentState.from_json: invalid fields — {e}") from e
 

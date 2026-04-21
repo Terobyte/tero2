@@ -1,0 +1,14 @@
+// Claude CLI --output-format stream-json captured output (synthetic fixture)
+// Each line is one JSON object as emitted by the claude process stdout.
+// Captured shape: system → assistant (text) → assistant (thinking) → assistant (tool_use) → user (tool_result string) → assistant (tool_use) → user (tool_result list) → assistant (multi-block: text+tool_use) → result
+{"type": "system", "tools": ["bash", "read", "write"]}
+{"type": "assistant", "message": {"content": [{"type": "text", "text": "I'll analyze the codebase structure for you."}]}}
+{"type": "assistant", "message": {"content": [{"type": "thinking", "thinking": "Let me first inspect the directory layout, then identify the key entry points."}]}}
+{"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "toolu_01AbcDefGhi", "name": "bash", "input": {"command": "ls -la /repo"}}]}}
+{"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_01AbcDefGhi", "content": "total 48\ndrwxr-xr-x  12 user user  384 Apr 20 09:00 ."}]}}
+{"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "toolu_02MnoPqrStu", "name": "read", "input": {"file_path": "/repo/tero2/runner.py"}}]}}
+{"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_02MnoPqrStu", "content": [{"type": "text", "text": "README.md"}, {"type": "text", "text": "pyproject.toml"}]}]}}
+{"type": "assistant", "message": {"content": [{"type": "text", "text": "I've completed the analysis."}, {"type": "tool_use", "id": "toolu_03VwxYzAbcd", "name": "bash", "input": {"command": "cat pyproject.toml"}}]}}
+{"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_03VwxYzAbcd", "content": "[project]\nname = \"tero2\""}]}}
+{"type": "assistant", "message": {"content": [{"type": "text", "text": "The main entry point is tero2/runner.py."}]}}
+{"type": "result", "subtype": "success"}

@@ -150,7 +150,10 @@ class EventDispatcher:
                 if not q.full():
                     # Fast path: there is room; put_nowait handles _unfinished_tasks
                     # bookkeeping and wakes up any consumers blocked on an empty queue.
-                    q.put_nowait(event)
+                    try:
+                        q.put_nowait(event)
+                    except asyncio.QueueFull:
+                        pass  # TOCTOU: queue filled between full() check and put_nowait
                     continue
 
                 # Slow path: queue is at or above capacity. Manipulate the internal

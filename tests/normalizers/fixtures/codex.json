@@ -1,0 +1,52 @@
+[
+  {
+    "_comment": "Assistant text message",
+    "type": "text",
+    "text": "I'll help you implement the requested feature."
+  },
+  {
+    "_comment": "Status marker",
+    "type": "status",
+    "text": "Processing request..."
+  },
+  {
+    "_comment": "Tool invocation — Codex uses 'cmd' inside input (not 'command')",
+    "type": "tool_use",
+    "id": "call_Abc123Xyz",
+    "name": "bash",
+    "input": {"cmd": "git log --oneline -5"}
+  },
+  {
+    "_comment": "Tool result — plain string",
+    "type": "tool_result",
+    "tool_use_id": "call_Abc123Xyz",
+    "content": "a1b2c3d fix: resolve race condition\ne4f5g6h add: unit tests for runner"
+  },
+  {
+    "_comment": "Apply patch tool use",
+    "type": "tool_use",
+    "id": "call_Def456Uvw",
+    "name": "apply_patch",
+    "input": {"patch": "--- a/tero2/runner.py\n+++ b/tero2/runner.py\n@@ -1,3 +1,4 @@\n+# patched\n"}
+  },
+  {
+    "_comment": "Apply patch result",
+    "type": "tool_result",
+    "tool_use_id": "call_Def456Uvw",
+    "content": "Applied successfully."
+  },
+  {
+    "_comment": "Codex-specific unknown type — falls back to text",
+    "type": "assistant_message",
+    "text": "Patch applied. Moving to next step."
+  },
+  {
+    "_comment": "Error from Codex",
+    "type": "error",
+    "text": "sandbox: command not permitted"
+  },
+  {
+    "_comment": "Stream terminator",
+    "type": "turn_end"
+  }
+]

@@ -1,0 +1,59 @@
+[
+  {
+    "_comment": "SDK text message — assistant narration",
+    "type": "text",
+    "text": "Processing your request via GLM-5.1."
+  },
+  {
+    "_comment": "SDK thinking block (extended thinking enabled via settings)",
+    "type": "thinking",
+    "thinking": "The user wants me to analyze the runner. I should start by reading the file."
+  },
+  {
+    "_comment": "Tool use from SDK message",
+    "type": "tool_use",
+    "id": "zai_toolu_01",
+    "name": "bash",
+    "input": {"command": "python -c \"import tero2; print(tero2.__file__)\""}
+  },
+  {
+    "_comment": "Tool result — plain string",
+    "type": "tool_result",
+    "tool_use_id": "zai_toolu_01",
+    "content": "/Users/terobyte/Desktop/Projects/Active/tero2/tero2/__init__.py"
+  },
+  {
+    "_comment": "Tool use — read file",
+    "type": "tool_use",
+    "id": "zai_toolu_02",
+    "name": "read",
+    "input": {"file_path": "/Users/terobyte/Desktop/Projects/Active/tero2/tero2/__init__.py"}
+  },
+  {
+    "_comment": "Tool result — list form (Zai/Claude SDK wraps in content list)",
+    "type": "tool_result",
+    "tool_use_id": "zai_toolu_02",
+    "content": [
+      {"type": "text", "text": "\"\"\"tero2 — autonomous agent orchestration.\"\"\"\n"}
+    ]
+  },
+  {
+    "_comment": "Status update from SDK",
+    "type": "status",
+    "text": "Running tool: bash"
+  },
+  {
+    "_comment": "Error — Zai uses 'error' key for API errors",
+    "type": "error",
+    "error": "GLM-5.1: upstream connection reset"
+  },
+  {
+    "_comment": "Final assistant text",
+    "type": "text",
+    "text": "Analysis complete. The package initializes the SORA orchestration system."
+  },
+  {
+    "_comment": "Stream terminator emitted by SDK wrapper",
+    "type": "turn_end"
+  }
+]

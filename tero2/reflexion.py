@@ -60,6 +60,11 @@ class ReflexionContext:
         return len(self.attempts) == 0
 
 
+def truncate_attempts(context: ReflexionContext) -> ReflexionContext:
+    """Return a new ReflexionContext with builder_output truncated in each attempt."""
+    return build_reflexion_context(context.attempts)
+
+
 def build_reflexion_context(
     attempts: list[ReflexionAttempt],
 ) -> ReflexionContext:
@@ -71,7 +76,7 @@ def build_reflexion_context(
     for a in attempts:
         output = a.builder_output
         if len(output) > MAX_BUILDER_OUTPUT_CHARS:
-            output = output.encode("utf-8")[:MAX_BUILDER_OUTPUT_CHARS].decode("utf-8", errors="ignore") + "... [truncated]"
+            output = output.encode("utf-8")[:MAX_BUILDER_OUTPUT_CHARS].decode("utf-8", errors="replace") + "... [truncated]"
         truncated.append(
             ReflexionAttempt(
                 attempt_number=a.attempt_number,

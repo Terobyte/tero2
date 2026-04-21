@@ -22,7 +22,7 @@ class HistoryEntry:
 
 def load_history() -> list[HistoryEntry]:
     try:
-        raw = json.loads(HISTORY_FILE.read_text())
+        raw = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
         return [HistoryEntry(**e) for e in raw.get("entries", [])]
     except (FileNotFoundError, json.JSONDecodeError, TypeError):
         return []
@@ -56,7 +56,11 @@ def record_run(project_path: Path, plan_file: Path | None) -> None:
             run_count=1,
         ))
 
-    entries.sort(key=lambda e: e.last_run, reverse=True)
+    try:
+        entries = sorted(entries, key=lambda e: e.last_run, reverse=True)
+    except (TypeError, ValueError):
+        pass  # keep existing order if sort fails on corrupted data
+
     _write(entries[:20])
 
 
@@ -70,5 +74,5 @@ def _write(entries: list[HistoryEntry]) -> None:
     HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
     data = {"version": _VERSION, "entries": [asdict(e) for e in entries]}
     tmp = HISTORY_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     tmp.replace(HISTORY_FILE)

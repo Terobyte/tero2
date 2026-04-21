@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 from tero2.state import AgentState
@@ -12,6 +13,9 @@ class DiskLayer:
     def __init__(self, project_path: Path) -> None:
         self.project_path = project_path
         self.sora_dir = project_path / ".sora"
+        self._metrics_lock = threading.Lock()
+        # Per-instance, per-thread last-read tracking for delta-based write_metrics
+        self._metrics_thread_local = threading.local()
 
     def init(self) -> None:
         dirs = [
@@ -58,7 +62,8 @@ class DiskLayer:
         with open(path, "a", encoding="utf-8") as f:
             f.write(content)
 
-    def read_metrics(self) -> dict:
+    def _read_metrics_raw(self) -> dict:
+        """Read metrics from disk without acquiring lock (caller holds lock)."""
         try:
             return json.loads(
                 (self.sora_dir / "reports" / "metrics.json").read_text(encoding="utf-8")
@@ -66,10 +71,32 @@ class DiskLayer:
         except (OSError, json.JSONDecodeError):
             return {}
 
+    def read_metrics(self) -> dict:
+        with self._metrics_lock:
+            data = self._read_metrics_raw()
+            # Track what this thread last read (per-instance) for delta-based write_metrics
+            self._metrics_thread_local.last_read = dict(data)
+            return data
+
     def write_metrics(self, metrics: dict) -> None:
-        path = self.sora_dir / "reports" / "metrics.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+        last_read: dict = getattr(self._metrics_thread_local, "last_read", {})
+        with self._metrics_lock:
+            # Re-read current state under lock to prevent lost updates
+            current = self._read_metrics_raw()
+            # Apply delta: for numeric values, add (new - last_read) to current.
+            # This makes the operation atomic: even if a thread read a stale value,
+            # its actual increment contribution is correctly applied.
+            for k, v in metrics.items():
+                if isinstance(v, (int, float)):
+                    delta = v - last_read.get(k, 0)
+                    current[k] = current.get(k, 0) + delta
+                else:
+                    current[k] = v
+            path = self.sora_dir / "reports" / "metrics.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(current, indent=2), encoding="utf-8")
+            # Update thread-local so subsequent write_metrics in same thread use fresh baseline
+            self._metrics_thread_local.last_read = dict(current)
 
     def append_activity(self, event: dict) -> None:
         path = self.sora_dir / "reports" / "activity.jsonl"
@@ -90,6 +117,19 @@ class DiskLayer:
         path = Path(plan_file)
         if not path.is_absolute():
             path = self.project_path / path
+        # Resolve symlinks and validate path stays within project_path
+        try:
+            resolved = path.resolve()
+            project_resolved = self.project_path.resolve()
+            if not str(resolved).startswith(str(project_resolved)):
+                raise ValueError(
+                    f"path traversal detected: {plan_file!r} resolves outside "
+                    f"project directory ({project_resolved})"
+                )
+        except ValueError:
+            raise
+        except OSError:
+            pass  # let the read below handle it
         try:
             return path.read_text(encoding="utf-8")
         except (OSError, FileNotFoundError):

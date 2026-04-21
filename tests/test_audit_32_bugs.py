@@ -7,6 +7,7 @@ Run: pytest tests/test_audit_32_bugs.py -v
 from __future__ import annotations
 
 import math
+import time
 
 import pytest
 
@@ -302,6 +303,7 @@ class TestBug18HalfOpenStuckForever:
     def test_half_open_allows_exactly_one_trial(self):
         cb = CircuitBreaker(name="test", failure_threshold=3, recovery_timeout_s=60)
         cb.state = CBState.HALF_OPEN
+        cb.last_failure_time = time.monotonic() - 1  # recent failure, within timeout
 
         # First check: allowed (trial request)
         cb.check()  # should NOT raise

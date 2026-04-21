@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import random
 from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from typing import Any
 
 from tero2.circuit_breaker import CircuitBreakerRegistry
 from tero2.constants import RATE_LIMIT_MAX_RETRIES, RATE_LIMIT_WAIT_S
 from tero2.errors import (
+    CircuitOpenError,
     ProviderError,
     ProviderNotReadyError,
     ProviderTimeoutError,
@@ -67,10 +69,12 @@ class ProviderChain:
         return self._current_provider_index
 
     async def run(self, **kwargs: Any) -> AsyncGenerator[Any, None]:
+        any_attempted = False
         for idx, provider in enumerate(self.providers):
             cb = self.cb_registry.get(provider.display_name)
             if not cb.is_available:
                 continue
+            any_attempted = True
             self._current_provider_index = idx
 
             # Per-provider retry loop: attempt 0 = initial call,
@@ -88,21 +92,31 @@ class ProviderChain:
 
                 try:
                     messages: list[Any] = []
-                    async for msg in provider.run(**kwargs):
-                        messages.append(msg)
+                    async with aclosing(provider.run(**kwargs)) as stream:
+                        async for msg in stream:
+                            if isinstance(msg, dict) and msg.get("type") == "error":
+                                error_data = msg.get("error", {})
+                                error_msg = (
+                                    error_data.get("message", "")
+                                    or (error_data.get("data") or {}).get("message", "")
+                                    or str(error_data)
+                                )
+                                raise ProviderError(error_msg or "stream error event")
+                            messages.append(msg)
                     cb.record_success()
                     for msg in messages:
                         yield msg
                     return
                 except Exception as exc:
                     if not _is_recoverable_error(exc):
-                        cb.record_failure()
                         raise
                     # Inner loop continues to next attempt.
             else:
                 # All retries for this provider exhausted — count as one CB failure.
                 cb.record_failure()
 
+        if not any_attempted:
+            raise CircuitOpenError("all providers circuit-broken")
         raise RateLimitError("all providers in chain exhausted")
 
     async def run_prompt(self, prompt: str) -> AsyncGenerator[Any, None]:

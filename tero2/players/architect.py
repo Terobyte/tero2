@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from tero2.disk_layer import DiskLayer
+from tero2.errors import ProviderError, RateLimitError
 from tero2.players.base import BasePlayer, PlayerResult
 from tero2.providers.chain import ProviderChain
 
@@ -107,11 +108,27 @@ class ArchitectPlayer(BasePlayer):
             if errors:
                 for e in errors:
                     log.error("plan validation error: %s", e)
-                return ArchitectResult(
-                    success=False,
-                    error="plan validation failed: " + "; ".join(errors),
-                    plan=plan,
-                )
+                # Only attempt disk recovery when the plan has zero tasks —
+                # that is the only case where an agent CLI may have written
+                # the plan to a file instead of returning it as text.
+                if _count_tasks(plan) == 0:
+                    recovered = self._recover_plan_from_disk(slice_id, milestone_path)
+                    if recovered is not None:
+                        recovered_path, recovered_content = recovered
+                        log.warning("architect: using recovered plan from %s", recovered_path)
+                        recovered_errors = validate_plan(recovered_content)
+                        if not recovered_errors:
+                            plan = recovered_content
+                            errors = []
+                        else:
+                            for e in recovered_errors:
+                                log.error("recovered plan also invalid: %s", e)
+                if errors:
+                    return ArchitectResult(
+                        success=False,
+                        error="plan validation failed: " + "; ".join(errors),
+                        plan=plan,
+                    )
             output_path = f"{milestone_path}/{slice_id}/{slice_id}-PLAN.md"
             self.disk.write_file(output_path, plan)
             task_count = _count_tasks(plan)
@@ -124,6 +141,8 @@ class ArchitectPlayer(BasePlayer):
                 task_count=task_count,
                 slice_plan=slice_plan,
             )
+        except (ProviderError, RateLimitError):
+            raise
         except Exception as exc:
             log.error("architect failed: %s", exc)
             return ArchitectResult(success=False, error=str(exc))
@@ -134,6 +153,51 @@ class ArchitectPlayer(BasePlayer):
         if plan:
             return plan
         return self.disk.read_file(f"{milestone_path}/ROADMAP.md") or ""
+
+    def _recover_plan_from_disk(
+        self, slice_id: str, milestone_path: str
+    ) -> tuple[str, str] | None:
+        """Try to read a plan file that the agent wrote to disk.
+
+        Checks candidate locations in order:
+        1. ``{working_dir}/{slice_id}-PLAN.md`` — agent CLI working dir (project root)
+        2. ``{milestone_path}/{slice_id}/{slice_id}-PLAN.md`` — .sora milestone dir
+
+        Returns ``(path_str, content)`` for the first non-empty file whose
+        contents pass ``validate_plan``, or the first non-empty file if none
+        pass validation (caller is responsible for re-validating the result).
+
+        Returns ``None`` when no non-empty candidate exists.
+        """
+        import pathlib
+
+        candidate_paths: list[pathlib.Path] = []
+
+        if self.working_dir:
+            candidate_paths.append(pathlib.Path(self.working_dir) / f"{slice_id}-PLAN.md")
+
+        # .sora milestone location via disk layer
+        sora_path = self.disk.sora_dir / milestone_path / slice_id / f"{slice_id}-PLAN.md"
+        candidate_paths.append(sora_path)
+
+        found: list[tuple[str, str]] = []
+        for path in candidate_paths:
+            try:
+                content = path.read_text(encoding="utf-8").strip()
+                if content:
+                    log.info("architect: found plan candidate at %s", path)
+                    found.append((str(path), content))
+            except (OSError, FileNotFoundError):
+                continue
+
+        # Prefer the first candidate that passes validation; fall back to the
+        # first non-empty candidate so the caller can surface a meaningful error.
+        for path_str, content in found:
+            if not validate_plan(content):
+                return (path_str, content)
+        if found:
+            return found[0]
+        return None
 
     @staticmethod
     def _build_prompt(
@@ -191,8 +255,8 @@ def _parse_slice_plan(
     tasks: list[Task] = []
 
     # Split on task-header boundaries; first element is any preamble.
-    # Pattern matches `## T01:`, `## T02:`, …
-    split_re = re.compile(r"^(## T\d+:[^\n]*)\n", re.MULTILINE)
+    # Matches `## T01:`, `## T02:`, and `## T01 ` (space instead of colon).
+    split_re = re.compile(r"^(## T\d+[:\s][^\n]*)\n", re.MULTILINE)
     parts = split_re.split(content)
     # parts layout: [preamble, header1, body1, header2, body2, ...]
     # pairs start at index 1
@@ -202,11 +266,12 @@ def _parse_slice_plan(
 
         tid_match = _TASK_ID_RE.search(header)
         if not tid_match:
+            log.warning("_parse_slice_plan: dropping header with no task ID: %r", header)
             continue
         task_id = tid_match.group(0)
 
         # Split body at **Must-haves:** marker (case-insensitive, bold optional).
-        must_have_split = re.split(r"\*?\*?[Mm]ust.{0,3}[Hh]aves?\*?\*?:?", body, maxsplit=1)
+        must_have_split = re.split(r"\*?\*?[Mm]ust.{0,3}[Hh]aves?\*?\*?:?", body, maxsplit=1, flags=re.IGNORECASE)
         description = must_have_split[0].strip()
         must_haves: list[str] = []
         if len(must_have_split) > 1:
@@ -215,9 +280,9 @@ def _parse_slice_plan(
                 if line.startswith("-"):
                     must_haves.append(line.lstrip("- ").strip())
 
-        tasks.append(
-            Task(index=len(tasks), id=task_id, description=description, must_haves=must_haves)
-        )
+        task = Task(id=task_id, description=description, must_haves=must_haves)
+        tasks.append(task)
+        tasks[-1].index = len(tasks) - 1
 
     return SlicePlan(slice_id=slice_id, slice_dir=slice_dir, tasks=tasks)
 
@@ -246,7 +311,6 @@ def validate_plan(plan: str) -> list[str]:
         for ref in re.findall(r"T\d{2}", dep_match.group(1)):
             if ref not in task_ids:
                 errors.append(f"dependency references unknown task {ref}")
-    _TASK_SPLIT_RE = re.compile(r"^(##\s+T\d{2}[:\s][^\n]*)", re.MULTILINE)
     parts = _TASK_SPLIT_RE.split(plan)
     # parts: [preamble, header1, body1, header2, body2, ...]
     for idx in range(1, len(parts) - 1, 2):
@@ -264,6 +328,7 @@ def validate_plan(plan: str) -> list[str]:
 _TASK_RE = re.compile(r"^##\s+T\d{2}[:\s]", re.MULTILINE)
 _TASK_ID_RE = re.compile(r"T\d{2}")
 _MUST_HAVE_RE = re.compile(r"must.{0,3}have", re.IGNORECASE)
+_TASK_SPLIT_RE = re.compile(r"^(##\s+T\d{2}[:\s][^\n]*)", re.MULTILINE)
 
 
 def _count_tasks(plan: str) -> int:
@@ -277,3 +342,7 @@ def _extract_task_ids(plan: str) -> set[str]:
         if tid:
             ids.add(tid.group(0))
     return ids
+
+
+# Public alias used by tests and external callers.
+parse_plan = _parse_slice_plan

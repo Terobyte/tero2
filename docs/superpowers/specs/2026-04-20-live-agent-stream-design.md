@@ -20,11 +20,12 @@
   - `phases/architect_phase.py:56` — `ArchitectPlayer(chain, ctx.disk, working_dir=...)`
   - `phases/scout_phase.py:57` — `ScoutPlayer(chain, ctx.disk, working_dir=...)`
   - `phases/coach_phase.py:54` — `CoachPlayer(chain, ctx.disk, working_dir=...)`
-  - `phases/harden_phase.py:66` — `ReviewerPlayer(chain, ctx.disk)`
-  - `phases/execute_phase.py:266` — `BuilderPlayer(chain, ctx.disk, working_dir=...)`
-  - `phases/execute_phase.py:306` — `VerifierPlayer(chain, ctx.disk, working_dir=...)`
-- Все 6 player-подклассов имеют identical `__init__(chain, disk, *, working_dir="")` — кросс-изменение конструктора делается механически в 6 файлах.
-- `ProviderChain.providers` — публичное имя списка (`chain.py:59`), **не** `_providers`.
+  - `phases/harden_phase.py:66` — `ReviewerPlayer(chain, ctx.disk)` (вызывается без working_dir, но сигнатура его имеет с дефолтом `""`)
+  - `phases/execute_phase.py:267` — `BuilderPlayer(chain, ctx.disk, working_dir=...)`
+  - `phases/execute_phase.py:310` — `VerifierPlayer(chain, ctx.disk, working_dir=...)`
+- Все 6 player-подклассов имеют identical `__init__(chain, disk, *, working_dir="")`. Кросс-изменение конструктора: 6 одинаковых правок — добавить `stream_bus=None` kwarg в каждый.
+- `ProviderChain.providers` — публичное имя списка (`chain.py:60`), **не** `_providers`.
+- `ShellProvider` (`providers/shell.py`) — не в `DEFAULT_PROVIDERS`, не в SORA pipeline. Falls through to `FallbackNormalizer`. Аналогично `gemma` — add `# TODO: ShellNormalizer` if it becomes active.
 
 ---
 
@@ -40,7 +41,7 @@
 - Новый модуль `tero2/stream_bus.py` (`StreamEvent` dataclass + `StreamBus` fan-out dispatcher)
 - Новый пакет `tero2/providers/normalizers/` (5 normalizer-функций + golden fixtures)
 - Рефактор `tero2/providers/cli.py` (убрать буфер, стримить yield'ами)
-- Рефактор `tero2/providers/chain.py` (добавить `current_provider_name` property, ограничить retry-политику)
+- Рефактор `tero2/providers/chain.py` (добавить `provider_kind` property, ограничить retry-политику)
 - Рефактор `tero2/players/base.py` (`_run_prompt` стрим-aware через normalizer → bus)
 - Новые TUI-виджеты: `stream_panel.py`, `heartbeat_sidebar.py`, `stream_event_formatter.py`, `status_log.py`
 - Изменение раскладки `tero2/tui/app.py` + обновление хоткеев
@@ -142,11 +143,12 @@ tero2/
 ├── providers/
 │   ├── base.py                     (existing)
 │   ├── cli.py                      [MOD] убрать буфер
-│   ├── chain.py                    [MOD] + current_provider_name, retry policy
+│   ├── chain.py                    [MOD] + provider_kind property, retry policy
 │   ├── shell.py, zai.py, catalog.py, registry.py
 │   └── normalizers/                [NEW package]
-│       ├── __init__.py             [NEW] get_normalizer(provider_name) dispatcher
+│       ├── __init__.py             [NEW] get_normalizer(provider_kind) dispatcher
 │       ├── base.py                 [NEW] StreamNormalizer Protocol
+│       ├── fallback.py             [NEW] FallbackNormalizer for unknown providers
 │       ├── claude.py               [NEW] parses stream-json
 │       ├── codex.py                [NEW]
 │       ├── opencode.py             [NEW]
@@ -223,6 +225,7 @@ class StreamEvent:
         "thinking",                 # chain-of-thought
         "status",                   # start/end/turn_boundary
         "error",                    # stream or parse error
+        "turn_end",                 # CLIProvider emits after proc.wait() completes
     ]
     timestamp: datetime             # UTC
     content: str = ""               # for text/thinking/status/error
@@ -233,8 +236,33 @@ class StreamEvent:
     raw: dict = field(default_factory=dict)  # original provider dict
 
 
-def make_stream_event(...) -> StreamEvent:
+def make_stream_event(
+    role: str,
+    kind: Literal[
+        "text", "tool_use", "tool_result",
+        "thinking", "status", "error", "turn_end",
+    ],
+    *,
+    timestamp: datetime | None = None,
+    content: str = "",
+    tool_name: str = "",
+    tool_args: dict | None = None,
+    tool_output: str = "",
+    tool_id: str = "",
+    raw: dict | None = None,
+) -> StreamEvent:
     """Factory with `datetime.now(timezone.utc)` default."""
+    return StreamEvent(
+        role=role,
+        kind=kind,
+        timestamp=timestamp or datetime.now(timezone.utc),
+        content=content,
+        tool_name=tool_name,
+        tool_args=tool_args or {},
+        tool_output=tool_output,
+        tool_id=tool_id,
+        raw=raw or {},
+    )
 ```
 
 ### StreamBus
@@ -255,6 +283,7 @@ class StreamBus:
     def __init__(self, max_queue_size: int = 2000):
         self._subscribers: list[asyncio.Queue[StreamEvent]] = []
         self._max = max_queue_size
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def subscribe(self) -> asyncio.Queue[StreamEvent]:
         q = asyncio.Queue(maxsize=self._max)
@@ -268,10 +297,24 @@ class StreamBus:
             pass
 
     def publish(self, event: StreamEvent) -> None:
-        """Publish event to all subscribers. Must be called from the asyncio
-        event-loop thread (uses put_nowait on asyncio.Queue). In tero2 this
-        is always the case: publish sites are inside async functions
-        (BasePlayer._run_prompt, RunnerContext.run_agent)."""
+        """Publish event to all subscribers.
+
+        Captures the running event loop on first call and verifies all
+        subsequent calls happen from the same loop. If called from a
+        different thread, uses loop.call_soon_threadsafe as fallback.
+        """
+        if self._loop is None:
+            self._loop = asyncio.get_running_loop()
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        if current_loop is not self._loop:
+            self._loop.call_soon_threadsafe(self._publish_impl, event)
+            return
+        self._publish_impl(event)
+
+    def _publish_impl(self, event: StreamEvent) -> None:
         for q in self._subscribers:
             if q.full():
                 try:
@@ -280,8 +323,8 @@ class StreamBus:
                     pass
             try:
                 q.put_nowait(event)
-            except asyncio.QueueFull:
-                pass
+            except (asyncio.QueueFull, Exception):
+                pass    # catch broadly — one bad subscriber must not poison others
 ```
 
 **Threading constraint:** `publish()` must be called from the asyncio event loop (same loop as the TUI's subscribers). `asyncio.Queue.put_nowait` from a non-loop thread is not safe. In tero2 all publish sites are inside async functions that run in the main loop — this is always satisfied. If future consumers need cross-thread publishing, use `loop.call_soon_threadsafe(q.put_nowait, event)`.
@@ -291,13 +334,13 @@ class StreamBus:
 ```python
 # tero2/providers/normalizers/base.py
 
-from typing import Protocol, Callable, Iterable
+from typing import Protocol, Callable, Iterable, Any
 from datetime import datetime
 
 class StreamNormalizer(Protocol):
     def normalize(
         self,
-        raw: dict | str,
+        raw: Any,
         role: str,
         now: Callable[[], datetime] = ...,
     ) -> Iterable[StreamEvent]:
@@ -308,6 +351,7 @@ class StreamNormalizer(Protocol):
         - Empty iterable for irrelevant lines (metadata, heartbeats)
         - On parse failure: yield ONE StreamEvent(kind="error", content=<reason>, raw=<dict>)
         - Pure function — no I/O, no global state, no mutation
+        - raw type is Any because ZaiProvider yields SDK Message objects (not dict/str)
         """
 ```
 
@@ -334,8 +378,10 @@ _NORMALIZERS: dict[str, StreamNormalizer] = {
 
 _FALLBACK = FallbackNormalizer()  # emits kind="status" with content=str(raw)
 
-def get_normalizer(provider_name: str) -> StreamNormalizer:
-    return _NORMALIZERS.get(provider_name, _FALLBACK)
+def get_normalizer(provider_kind: str) -> StreamNormalizer:
+    """Look up normalizer by provider_kind (e.g. 'claude', 'zai').
+    NOT by display_name — display_name may be 'ZAI (GLM-5.1)'."""
+    return _NORMALIZERS.get(provider_kind, _FALLBACK)
 ```
 
 ---
@@ -344,7 +390,7 @@ def get_normalizer(provider_name: str) -> StreamNormalizer:
 
 ### `tero2/providers/cli.py` — break buffering
 
-**Current (lines 189-230):**
+**Current (lines 192-230):**
 ```python
 lines: list[str] = []
 async for line in proc.stdout:
@@ -377,9 +423,11 @@ yield {"type":"turn_end","text":""}
 
 **Key change:** yield happens inside the streaming loop, not after `proc.wait()`. stderr task remains.
 
-### `tero2/providers/chain.py` — retry policy + current_provider_name
+### `tero2/providers/chain.py` — retry policy + provider_kind
 
-1. Add `@property current_provider_name(self) -> str: return self.providers[self._current_provider_index].display_name` — note public `self.providers` (not `_providers`).
+1. Add `@property provider_kind(self) -> str` — returns normalized provider type key for normalizer lookup (e.g. `"claude"`, `"zai"`, `"codex"`). Uses a new `BaseProvider.kind` attribute (or falls back to `self.providers[self._current_provider_index].display_name.lower().split()[0]`). This is **distinct** from `display_name` which returns human-readable names like `"ZAI (GLM-5.1)"`. The normalizer dispatcher keys on `provider_kind`, not `display_name`.
+
+   **Rationale:** `ZaiProvider.display_name` returns `"ZAI (GLM-5.1)"` while the normalizer dict key is `"zai"`. Using `display_name` directly would cause a lookup miss → `FallbackNormalizer`. Each provider must implement a `kind` property returning its canonical short name.
 
 2. **Retry logic + error-detection semantics:**
     - "Yielded" means: **the chain has `yield`-ed at least one message up to its caller**. A dict coming in from `provider.run()` is considered "yielded" only after the chain's own `yield` statement has passed it along. Before that, the chain can inspect it and treat `{"type":"error",...}` as a retryable signal.
@@ -411,12 +459,14 @@ async def run(self, **kwargs):
                 return
             except Exception as exc:
                 if not _is_recoverable_error(exc):
+                    cb.record_failure()
                     raise
                 if yielded_anything:
+                    cb.record_failure()
                     raise                       # cannot retry mid-stream
-                # else: fall through to next attempt (retry)
-        else:
-            cb.record_failure()
+                # else: recoverable, no yield yet → fall through to next attempt
+        # all retries exhausted for this provider
+        cb.record_failure()
 
     raise RateLimitError("all providers in chain exhausted")
 ```
@@ -436,25 +486,48 @@ class BasePlayer(ABC):
     async def _run_prompt(self, prompt: str) -> str:
         text_parts: list[str] = []
         async for raw in self.chain.run_prompt(prompt):
-            provider_name = self.chain.current_provider_name
-            normalizer = get_normalizer(provider_name)
-            for event in normalizer.normalize(raw, self.role):
+            provider_kind = self.chain.provider_kind
+            normalizer = get_normalizer(provider_kind)
+            try:
+                events = list(normalizer.normalize(raw, self.role))
+            except Exception as exc:
+                events = [StreamEvent(
+                    role=self.role, kind="error", timestamp=datetime.now(timezone.utc),
+                    content=f"normalizer error: {exc}", raw={"raw_repr": repr(raw)[:200]},
+                )]
+            for event in events:
                 if self._stream_bus is not None:
                     self._stream_bus.publish(event)
+                # Only collect "text" kind for return value.
+                # tool_output and thinking are published to StreamBus for TUI
+                # but NOT mixed into the return string — players parse this
+                # as structured text and tool_output would corrupt it.
                 if event.kind == "text":
                     text_parts.append(event.content)
         return "\n".join(text_parts)
 ```
 
-**Subclass cascade** (6 files — `architect.py`, `builder.py`, `scout.py`, `coach.py`, `verifier.py`, `reviewer.py`): каждый имеет identical `__init__(self, chain, disk, *, working_dir="")` → `super().__init__(chain, disk, working_dir=working_dir)`. Добавить `stream_bus=None` kwarg и пробросить в `super`. Механическая правка 6 × ~3 строки.
+**Subclass cascade** (6 files — `architect.py`, `builder.py`, `scout.py`, `coach.py`, `verifier.py`, `reviewer.py`): все 6 имеют identical `__init__(self, chain, disk, *, working_dir="")` → `super().__init__(chain, disk, working_dir=working_dir)`. Для всех 6: добавить `stream_bus=None` kwarg и пробросить в `super`. 6 одинаковых правок.
 
 ### `tero2/phases/context.py` — `RunnerContext.stream_bus` + `run_agent` streaming
 
 Добавить поле `stream_bus: StreamBus | None = None` в `RunnerContext` dataclass.
 
-`RunnerContext.run_agent()` — legacy-путь для роли `executor` (и любого прямого `run_agent` вызова). Сейчас итерирует `chain.run_prompt()` и извлекает текст из 3 форм сообщений (str / dict / объект-с-attr). Нужно переделать так же как `BasePlayer._run_prompt`: прогонять каждое сообщение через `get_normalizer(chain.current_provider_name)` и публиковать нормализованные события в `self.stream_bus`.
+`RunnerContext.run_agent()` — legacy-путь для роли `executor` (и любого прямого `run_agent` вызова). Сейчас итерирует `chain.run_prompt()` и извлекает текст из 3 форм сообщений (str / dict / объект-с-attr). Нужно переделать так же как `BasePlayer._run_prompt`: прогонять каждое сообщение через `get_normalizer(chain.provider_kind)` и публиковать нормализованные события в `self.stream_bus`. Normalizer fetched **per-message** inside the loop (not once outside) to handle provider failover correctly.
+
+**Important:** no `isinstance(message, dict)` guard — `ZaiProvider` yields SDK `Message` objects (not dicts). The normalizer handles any type via `raw: Any`.
 
 ```python
+def _extract_text_from_message(message: Any) -> str:
+    """Extract text content from provider output (3 shapes: str, dict, object)."""
+    if isinstance(message, str):
+        return message
+    if isinstance(message, dict):
+        return message.get("text") or message.get("content") or ""
+    return getattr(message, "text", None) or getattr(message, "content", None) or ""
+
+
+async def run_agent(self, chain, prompt_text, *, role="executor") -> tuple[bool, str]:
 async def run_agent(self, chain, prompt_text, *, role="executor") -> tuple[bool, str]:
     ...
     captured_parts: list[str] = []
@@ -464,10 +537,19 @@ async def run_agent(self, chain, prompt_text, *, role="executor") -> tuple[bool,
         if text_content:
             captured_parts.append(text_content)
 
-        # NEW: normalize + publish to stream_bus
-        if self.stream_bus is not None and isinstance(message, dict):
-            normalizer = get_normalizer(chain.current_provider_name)
-            for event in normalizer.normalize(message, role):
+        # NEW: normalize + publish to stream_bus (no isinstance check — zai yields objects)
+        # Normalizer fetched per-message to handle provider failover mid-stream
+        if self.stream_bus is not None:
+            provider_kind = chain.provider_kind  # updated on failover
+            normalizer = get_normalizer(provider_kind)
+            try:
+                events = list(normalizer.normalize(message, role))
+            except Exception as exc:
+                events = [StreamEvent(
+                    role=role, kind="error", timestamp=datetime.now(timezone.utc),
+                    content=f"normalizer error: {exc}", raw={"raw_repr": repr(message)[:200]},
+                )]
+            for event in events:
                 self.stream_bus.publish(event)
         # ...existing step counting / stuck detection / heartbeat logic unchanged
 ```
@@ -515,14 +597,14 @@ player = CoachPlayer(chain, ctx.disk, working_dir=..., stream_bus=ctx.stream_bus
 # harden_phase.py:66
 player = ReviewerPlayer(chain, ctx.disk, stream_bus=ctx.stream_bus)
 
-# execute_phase.py:266
+# execute_phase.py:267
 builder = BuilderPlayer(builder_chain, ctx.disk, working_dir=working_dir, stream_bus=ctx.stream_bus)
 
-# execute_phase.py:306
+# execute_phase.py:310
 verifier = VerifierPlayer(verifier_chain, ctx.disk, working_dir=working_dir, stream_bus=ctx.stream_bus)
 ```
 
-Это 6 одинаковых механических правок.
+Все 6 правок одинаковы: добавить `stream_bus=ctx.stream_bus` kwarg.
 
 ### `tero2/cli.py` — wire bus into DashboardApp
 
@@ -564,14 +646,25 @@ Header
 - Owns `active_role` reactive property (str). Default: auto-switch by priority.
 - Owns `pinned_role` reactive property (str | None). When set, `active_role` doesn't auto-switch.
 - Owns `raw_mode` reactive property (bool). Toggles via `v` hotkey.
-- Internal `RoleBufferManager`: `dict[str, deque[StreamEvent]]` (maxlen=500 per role).
+- Internal per-role buffer: `dict[str, deque[StreamEvent]]` (maxlen=500 per role). Not a separate class — just a plain dict of deques managed directly by the panel.
 - Subscribes to `StreamBus`; on event: append to per-role buffer; refresh render if `event.role == self.active_role`.
 - Render: iterate events of active role through `stream_event_formatter.format(event, raw_mode=self.raw_mode)`.
 - Header line: `● <role> · <elapsed> [pinned: <role>]  v: raw-mode`
 
 **`HeartbeatSidebar`** (`tui/widgets/heartbeat_sidebar.py`):
 - Renders 7 mini-cells vertically.
-- Per-role state aggregator (`RoleMetrics` dataclass: `status`, `elapsed_s`, `tool_count`, `last_line`, `provider`, `model`).
+- Per-role state aggregator (`RoleMetrics` dataclass):
+```python
+@dataclass
+class RoleMetrics:
+    status: str = "idle"         # "idle" | "running" | "async" | "error" | "done"
+    elapsed_s: float = 0.0      # seconds since first event
+    tool_count: int = 0          # number of tool_use events received
+    last_line: str = ""          # last text/tool_name for one-line preview
+    provider: str = ""           # e.g. "claude", "zai"
+    model: str = ""              # e.g. "claude-sonnet-4-6"
+    started_at: datetime | None = None  # first event timestamp for elapsed calc
+```
 - Subscribes to `StreamBus` + `EventDispatcher` (for phase events → `done`/`running` status).
 - Active-cell highlight: border `2px solid $accent` + background tint.
 - Status dot: 🟢 running, 🟡 async, ⚪ idle, 🔴 error, ✓ done.
@@ -591,6 +684,7 @@ Header
   - `thinking`: dim grey
   - `status`: cyan
   - `error`: red bold
+  - `turn_end`: dim cyan (thin separator line)
 - Role colors (same as `log_view.py`): scout=cyan, architect=blue, builder=green, coach=yellow, verifier=magenta, reviewer=purple, executor=white
 
 **`StatusLog`** (`tui/widgets/status_log.py`):
@@ -654,6 +748,10 @@ Index → role mapping **жёстко зашит** по `sidebar_role_order` (с
 ### `DashboardApp` wiring
 
 ```python
+# Current signature (tero2/tui/app.py:52):
+# def __init__(self, runner, dispatcher, command_queue)
+
+# New signature — add stream_bus parameter:
 def __init__(self, runner, dispatcher, command_queue, stream_bus):
     super().__init__()
     self._runner = runner
@@ -684,6 +782,13 @@ def on_mount(self):
     self.run_worker(self._consume_events(), exclusive=False)
     self.run_worker(self._consume_stream(), exclusive=False)
 
+def on_unmount(self):
+    """Clean up subscribers to prevent queue/memory leaks."""
+    if self._event_queue is not None:
+        self._dispatcher.unsubscribe(self._event_queue)
+    if self._stream_queue is not None:
+        self._stream_bus.unsubscribe(self._stream_queue)
+
 async def _consume_stream(self):
     """Drain StreamBus; route to stream_panel + heartbeat."""
     if self._stream_queue is None:
@@ -694,6 +799,17 @@ async def _consume_stream(self):
         event = await self._stream_queue.get()
         stream_panel.on_stream_event(event)
         heartbeat.on_stream_event(event)
+
+async def _consume_events(self):
+    """Drain EventDispatcher; route phase/done/error to StatusLog + HeartbeatSidebar."""
+    if self._event_queue is None:
+        return
+    status_log = self.query_one("#status-log", StatusLog)
+    heartbeat = self.query_one("#heartbeat", HeartbeatSidebar)
+    while True:
+        event = await self._event_queue.get()
+        status_log.on_event(event)
+        heartbeat.on_phase_event(event)   # for status dot transitions (done/error/phase_change)
 ```
 
 ---
@@ -703,11 +819,12 @@ async def _consume_stream(self):
 | Failure                                     | Behavior                                                              |
 |---------------------------------------------|-----------------------------------------------------------------------|
 | Normalizer `JSONDecodeError`                | Normalizer yields `StreamEvent(kind="error", content="parse: <msg>", raw=...)` → renders red in main |
+| Normalizer unexpected exception (bug)       | `_run_prompt` / `run_agent` wraps normalizer call in try/except, publishes `StreamEvent(kind="error", content="normalizer error: <exc>")` to bus. Stream continues with next message. |
 | Normalizer unknown event structure          | `FallbackNormalizer` → yields `kind="status", content="raw: <dict>"`  |
-| Provider process crash mid-stream           | Exception in `CLIProvider.run()` → propagates through chain → caught by player → `PlayerResult(success=False)`. Events emitted before crash stay in bus (visible as history). |
+| Provider process crash mid-stream           | Exception in `CLIProvider.run()` → propagates through chain → caught by player → `PlayerResult(success=False)`. Events emitted before crash stay in bus (visible as history). No `turn_end` signal is emitted. TUI shows stream stopping abruptly — same visual as "stuck" but with error in status log. |
 | Provider rate-limit (early)                 | Caught by chain retry loop (only before first yield). Transparent.   |
 | Provider rate-limit (mid-stream)            | Not retryable — hard fail. Player fails, upstream sees error.         |
-| StreamBus subscriber dies (CancelledError)  | TUI `on_unmount` unsubscribes. Dead subscribers silently dropped in `publish()` |
+| StreamBus subscriber dies (CancelledError)  | TUI `on_unmount` calls `unsubscribe()`. Dead subscribers silently skipped in `publish()` |
 | Orphan `tool_use` (no matching `tool_result`)| Not fatal. Can be detected by UI (tool_id without result) — shown as `tool_use · waiting…` badge in future v2. MVP: just shown as 2 separate lines. |
 
 ---
@@ -730,7 +847,7 @@ async def _consume_stream(self):
 ### Integration (fake subprocess)
 
 - **`test_cli_provider_streaming.py`**: mock `asyncio.create_subprocess_exec` to yield scripted stdout controlled by `asyncio.Event` gates. Test flow: consumer iterates `provider.run()`, receives first N yields; at that point `proc.wait()` must still be blocked (verified by `proc.wait()` being pending on an Event that testing code hasn't set yet). Only after consumer acks N yields does the test release the `proc.wait()` gate. This avoids flaky timestamp-based assertions and directly verifies the streaming invariant.
-- **`test_player_stream_integration.py`**: fake chain yielding scripted dicts, fake bus collecting events. Assert bus receives normalized events AND player's returned string contains only text blocks
+- **`test_player_stream_integration.py`**: fake chain yielding scripted dicts, fake bus collecting events. Assert bus receives normalized events AND player's returned string contains only "text" kind content (no tool_output or thinking mixed in)
 
 ### End-to-end
 
@@ -754,7 +871,7 @@ Each step = one commit, each commit leaves the system in working state.
 - Verify: `pytest tests/test_stream_bus.py` green.
 
 ### Step 2 — Normalizers + golden fixtures
-- Files: `tero2/providers/normalizers/{__init__.py,base.py,claude.py,codex.py,opencode.py,kilo.py,zai.py}`, fixtures in `tests/normalizers/fixtures/`, `tests/normalizers/test_*.py`
+- Files: `tero2/providers/normalizers/{__init__.py,base.py,fallback.py,claude.py,codex.py,opencode.py,kilo.py,zai.py}`, fixtures in `tests/normalizers/fixtures/`, `tests/normalizers/test_*.py`
 - Fixtures collected one-off (manual). Committed as part of this step.
 - Normalizers not yet wired to anything.
 - Verify: `pytest tests/normalizers/` green.
@@ -765,7 +882,7 @@ Each step = one commit, each commit leaves the system in working state.
 - Existing tests (`test_cli.py` if any) should still pass — same semantic output, just streamed.
 - Verify: `pytest tests/` — full green.
 
-### Step 4 — `ProviderChain.current_provider_name` + retry policy + `BasePlayer._run_prompt` stream-aware
+### Step 4 — `ProviderChain.provider_kind` + retry policy + `BasePlayer._run_prompt` stream-aware
 - Files: `tero2/providers/chain.py`, `tero2/players/base.py`, `tests/test_chain_retry_policy.py`, `tests/test_player_stream_integration.py`
 - `BasePlayer` accepts `stream_bus=None` optional arg. When None, skip publish.
 - Existing player tests pass without changes (bus=None).

@@ -70,6 +70,8 @@ def _run_shell(cmd_str: str, cwd: str) -> tuple[int, str, str]:
             shell=True,
         )
         return proc.returncode, proc.stdout, proc.stderr
+    except FileNotFoundError:
+        return -1, "", f"command not found: {cmd_str}"
     except subprocess.TimeoutExpired:
         return -1, "", f"command timed out: {cmd_str}"
 
@@ -142,7 +144,7 @@ class VerifierPlayer(BasePlayer):
             log.error("verifier failed for %s: %s", task_id, exc)
             return VerifierResult(
                 success=False,
-                verdict=Verdict.FAIL,
+                verdict=Verdict.ANOMALY,
                 error=str(exc),
             )
 
@@ -160,5 +162,7 @@ def _extract_list(output: str, label: str) -> list[str]:
     matches = pattern.findall(output)
     items: list[str] = []
     for m in matches:
-        items.append(m.split(" - ")[0].strip())
+        part = m.lstrip(" -").split(" - ")[0].strip()
+        if part:
+            items.append(part)
     return items

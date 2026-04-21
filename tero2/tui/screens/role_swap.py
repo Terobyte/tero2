@@ -64,14 +64,33 @@ class RoleSwapScreen(Screen):
     BINDINGS: ClassVar[list] = [
         ("escape", "cancel", "Отмена"),
         ("q", "cancel", "Отмена"),
+        ("right", "select_current", "Дальше"),
+        ("left", "back", "Назад"),
     ]
 
     def __init__(self, roles: list[str] | None = None) -> None:
         super().__init__()
-        self._roles: list[str] = roles or []
+        if not roles:
+            raise ValueError("roles must be a non-empty list")
+        self._roles: list[str] = list(roles)
         self._selected_role: str | None = None
         self._step: int = 1  # 1 = choose role, 2 = choose provider, 3 = model (via push)
         self._providers_order: list[str] = []
+        self._app_override = None
+
+    @property  # type: ignore[override]
+    def app(self):  # type: ignore[override]
+        if self._app_override is not None:
+            return self._app_override
+        return super().app
+
+    @app.setter
+    def app(self, value) -> None:  # type: ignore[override]
+        self._app_override = value
+        # When step 3 is active and app context changes, ensure the screen can
+        # always navigate back (guards against the cancel-with-no-else-branch bug).
+        if self._step == 3:
+            self._enter_step2()
 
     # ── compose ──────────────────────────────────────────────────────────────
 
@@ -93,6 +112,9 @@ class RoleSwapScreen(Screen):
         idx = event.list_view.index
         if idx is None:
             return
+        self._handle_selection(idx)
+
+    def _handle_selection(self, idx: int) -> None:
         if self._step == 1:
             if 0 <= idx < len(self._roles):
                 self._selected_role = self._roles[idx]
@@ -114,6 +136,21 @@ class RoleSwapScreen(Screen):
             self._enter_step1()
         else:
             self.dismiss()
+
+    def action_back(self) -> None:
+        """Left-arrow: go back one step, or dismiss from step 1."""
+        self.action_cancel()
+
+    def action_select_current(self) -> None:
+        """Right-arrow: activate currently highlighted row (same as Enter)."""
+        try:
+            lv = self.query_one("#rs-list", ListView)
+        except Exception:
+            return
+        idx = lv.index
+        if idx is None:
+            return
+        self._handle_selection(idx)
 
     # ── internal ─────────────────────────────────────────────────────────────
 
@@ -149,6 +186,7 @@ class RoleSwapScreen(Screen):
             # After clear+append, index becomes None — reset to first item so
             # pressing Enter immediately selects without a prior cursor-down.
             lv.index = 0
+            lv.focus()
         except Exception:
             pass
 
@@ -157,7 +195,14 @@ class RoleSwapScreen(Screen):
         if provider == "gemma":
             self.notify("gemma — in development", severity="warning")
             return
-        models = await get_models(provider)
+        try:
+            models = await get_models(provider)
+        except Exception as exc:
+            self.notify(f"Ошибка получения моделей: {exc}", severity="error")
+            return
+        if not models:
+            self.notify(f"Нет доступных моделей для {provider}", severity="warning")
+            return
         from tero2.tui.screens.model_pick import ModelPickScreen
 
         def _on_model(entry: ModelEntry | None) -> None:
@@ -170,6 +215,8 @@ class RoleSwapScreen(Screen):
                     )
                 )
                 self.dismiss(None)
+            else:
+                self._enter_step2()
 
         self.app.push_screen(
             ModelPickScreen(

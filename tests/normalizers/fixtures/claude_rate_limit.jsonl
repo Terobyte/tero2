@@ -1,0 +1,3 @@
+// Claude CLI rate-limit error fixture (synthetic)
+// Emitted when the API returns a rate-limit response mid-stream.
+{"type": "error", "error": {"type": "rate_limit_error", "message": "API rate limit exceeded, retrying in 5s"}}

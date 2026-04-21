@@ -129,9 +129,13 @@ def load_config(project_path: Path, override_path: Path | None = None) -> Config
 
 def _load_toml(path: Path) -> dict:
     try:
-        return tomllib.loads(path.read_text(encoding="utf-8"))
-    except (OSError, FileNotFoundError, tomllib.TOMLDecodeError):
+        text = path.read_text(encoding="utf-8")
+    except (OSError, FileNotFoundError):
         return {}
+    try:
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"TOML syntax error in {path}: {exc}") from exc
 
 
 def _merge_dicts(base: dict, override: dict) -> dict:
@@ -198,6 +202,8 @@ def _parse_config(raw: dict) -> Config:
         tg_enabled = tg.get("enabled")
         if tg_enabled is None:
             tg_enabled = bool(tg.get("bot_token", ""))
+        elif isinstance(tg_enabled, str):
+            tg_enabled = tg_enabled.strip().lower() not in ("false", "0", "no", "off", "")
         cfg.telegram = TelegramConfig(
             enabled=bool(tg_enabled),
             bot_token=tg.get("bot_token", ""),
@@ -270,8 +276,8 @@ def _parse_config(raw: dict) -> Config:
 
     sora = raw.get("sora", {})
     if "max_slices" in sora:
-        cfg.max_slices = sora["max_slices"]
+        cfg.max_slices = int(sora["max_slices"])
     if "idle_timeout_s" in sora:
-        cfg.idle_timeout_s = sora["idle_timeout_s"]
+        cfg.idle_timeout_s = int(sora["idle_timeout_s"])
 
     return cfg

@@ -10,6 +10,7 @@ conditional triggers in priority order: STUCK > ANOMALY > HUMAN_STEER > BUDGET_6
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 
@@ -25,6 +26,10 @@ class CoachTrigger(str, Enum):
     BUDGET_60 = "budget_60"
     STUCK = "stuck"
     HUMAN_STEER = "human_steer"
+
+
+# Alias kept for compatibility with modules that import TriggerEvent.
+TriggerEvent = CoachTrigger
 
 
 @dataclass
@@ -78,12 +83,19 @@ def _check_stuck(state: AgentState, config: Config) -> bool:
     return state.escalation_level >= 2
 
 
+_ANOMALY_RE = re.compile(r"(?:^|##\s*)ANOMALY", re.MULTILINE)
+
+
 def _check_anomaly(disk: DiskLayer) -> bool:
-    """True if EVENT_JOURNAL.md contains an ANOMALY entry."""
+    """True if EVENT_JOURNAL.md contains a structured ANOMALY marker.
+
+    Matches '## ANOMALY ...' (structured event header) or 'ANOMALY ...' at
+    the start of a line.  Does NOT match 'ANOMALY' embedded in prose sentences.
+    """
     journal = disk.read_file("persistent/EVENT_JOURNAL.md")
     if not journal:
         return False
-    return "ANOMALY" in journal
+    return bool(_ANOMALY_RE.search(journal))
 
 
 def _check_human_steer(disk: DiskLayer) -> bool:

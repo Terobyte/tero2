@@ -246,6 +246,7 @@ async def run_execute(
                     stuck_result=stuck_result,
                     escalation_history=ctx.escalation_history,
                 )
+                ctx.checkpoint.save(ctx.state)
                 if esc_action.should_pause:
                     log.info("execute: human escalation — pausing for STEER.md input")
                     return PhaseResult(
@@ -288,7 +289,10 @@ async def run_execute(
                     builder_result.error,
                 )
                 ctx.state.retry_count += 1  # keep stuck-detection retry counter live
-                truncated = builder_result.captured_output[:MAX_BUILDER_OUTPUT_CHARS]
+                truncated = (
+                    builder_result.captured_output.encode("utf-8")[:MAX_BUILDER_OUTPUT_CHARS]
+                    .decode("utf-8", errors="replace")
+                )
                 reflexion_ctx = add_attempt(
                     reflexion_ctx,
                     builder_output=truncated,
@@ -335,19 +339,24 @@ async def run_execute(
             )
 
             # ANOMALY → check_triggers → Coach.
-            # Import lazily to avoid any circular-import risk at module load.
             if verify_result.verdict == Verdict.ANOMALY:
-                from tero2.phases.coach_phase import run_coach  # noqa: PLC0415
-
                 # Write the ANOMALY event to EVENT_JOURNAL.md so that
                 # check_triggers/_check_anomaly can find it.  Without this
                 # write the journal never contains "ANOMALY" and the trigger
                 # never fires, skipping Coach entirely.
+                # A65: wrap append_file in try/except — a disk write failure
+                # must not skip check_triggers / Coach invocation.
                 _ts = datetime.now(timezone.utc).isoformat()
-                ctx.disk.append_file(
-                    "persistent/EVENT_JOURNAL.md",
-                    f"\n## ANOMALY [{_ts}]\ntask={task.id} attempt={attempt + 1}\n",
-                )
+                try:
+                    ctx.disk.append_file(
+                        "persistent/EVENT_JOURNAL.md",
+                        f"\n## ANOMALY [{_ts}]\ntask={task.id} attempt={attempt + 1}\n",
+                    )
+                except OSError as _append_err:
+                    log.warning(
+                        "execute: failed to write ANOMALY to EVENT_JOURNAL.md: %s",
+                        _append_err,
+                    )
 
                 trigger_result = check_triggers(ctx.state, ctx.disk, ctx.config)
                 if trigger_result.should_fire:
@@ -355,14 +364,24 @@ async def run_execute(
                         "execute: ANOMALY — invoking Coach (trigger=%s)",
                         trigger_result.trigger.value,
                     )
-                    await run_coach(ctx, trigger_result.trigger)
+                    # A64: capture run_coach() result so failures are logged.
+                    coach_result = await run_coach(ctx, trigger_result.trigger)
+                    if coach_result is not None and not coach_result.success:
+                        log.warning(
+                            "execute: Coach invocation failed (trigger=%s): %s",
+                            trigger_result.trigger.value,
+                            getattr(coach_result, "error", "unknown"),
+                        )
                     # Refresh context hints after Coach updated strategy docs.
                     new_hints = ctx.disk.read_file("strategic/CONTEXT_HINTS.md")
                     if new_hints:
                         context_hints = new_hints
 
             ctx.state.retry_count += 1  # keep stuck-detection retry counter live
-            truncated = builder_result.captured_output[:MAX_BUILDER_OUTPUT_CHARS]
+            truncated = (
+                builder_result.captured_output.encode("utf-8")[:MAX_BUILDER_OUTPUT_CHARS]
+                .decode("utf-8", errors="replace")
+            )
             reflexion_ctx = add_attempt(
                 reflexion_ctx,
                 builder_output=truncated,
@@ -451,6 +470,7 @@ def _check_override(
     if _RE_PAUSE.search(override):
         log.info("execute: PAUSE override received")
         ctx.state = ctx.checkpoint.mark_paused(ctx.state, "paused via OVERRIDE.md")
+        ctx.checkpoint.save(ctx.state)
         ctx.disk.clear_override()
         return PhaseResult(
             success=False,
@@ -542,3 +562,26 @@ def _format_task_plan(task: Task) -> str:
         for item in task.must_haves:
             lines.append(f"- {item}")
     return "\n".join(lines)
+
+
+# ── Module-level coach shim ──────────────────────────────────────────────────
+# Exposed at module level so tests can patch ``execute_phase.run_coach`` and so
+# the ANOMALY path inside run_execute can use it without a per-call lazy import.
+# The lazy re-import inside the body ensures active patches on
+# ``coach_phase.run_coach`` are honoured at call time (A65).
+
+
+async def run_coach(ctx: RunnerContext, trigger: object) -> object:
+    """Thin shim — delegates to :func:`tero2.phases.coach_phase.run_coach`.
+
+    Using a lazy import inside the body avoids circular-import issues at
+    module load time while still allowing tests to patch
+    ``tero2.phases.execute_phase.run_coach``.
+    """
+    from tero2.phases.coach_phase import run_coach as _run_coach  # noqa: PLC0415
+
+    return await _run_coach(ctx, trigger)
+
+
+# Alias kept for backward-compatibility and test imports (A65).
+_run_task_loop = run_execute

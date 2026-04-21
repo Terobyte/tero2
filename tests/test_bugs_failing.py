@@ -200,6 +200,9 @@ async def test_shell_terminates_process_when_communicate_raises():
         def terminate(self) -> None:
             terminated.append(True)
 
+        async def wait(self) -> None:
+            pass
+
     with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=_MockProc()):
         provider = ShellProvider()
         with pytest.raises(asyncio.TimeoutError):

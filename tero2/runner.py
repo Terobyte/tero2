@@ -29,6 +29,7 @@ from tero2.phases import run_architect, run_coach, run_execute, run_harden, run_
 from tero2.phases.context import (
     RunnerContext,
     _load_slice_plan_from_disk,
+    _load_slice_plan_from_disk_safe,
     _read_next_slice,
 )
 from tero2.project_lock import ProjectLock
@@ -83,7 +84,6 @@ class Runner:
         self._ctx: RunnerContext | None = None
 
     async def run(self) -> None:
-        self.disk.init()
         _shutdown_event = asyncio.Event()
         loop = asyncio.get_running_loop()
 
@@ -93,6 +93,8 @@ class Runner:
 
         loop.add_signal_handler(signal.SIGTERM, _on_signal)
         loop.add_signal_handler(signal.SIGINT, _on_signal)
+
+        self.disk.init()
 
         try:
             self.lock.acquire()
@@ -192,8 +194,11 @@ class Runner:
             await self._dispatcher.emit(make_event("done", role="runner", priority=True))
 
     async def _emit_error(self, msg: str) -> None:
-        if self._dispatcher is not None:
-            await self._dispatcher.emit(
+        # A48: use getattr so this works even when Runner is constructed via
+        # __new__ without calling __init__ (e.g. in tests).
+        dispatcher = getattr(self, "_dispatcher", None)
+        if dispatcher is not None:
+            await dispatcher.emit(
                 make_event("error", role="runner", data={"message": msg}, priority=True)
             )
 
@@ -240,6 +245,35 @@ class Runner:
                         )
         return state, True
 
+    async def _apply_switch_provider(self, cmd: Command) -> None:
+        """Apply a switch_provider command to config.roles in-place.
+
+        Used by _idle_loop so that RoleSwap commands sent before a plan is
+        picked still take effect by the time _execute_plan starts.
+        """
+        role = cmd.data.get("role", "")
+        provider = cmd.data.get("provider", "")
+        model = cmd.data.get("model", "")
+        if role and provider and role in self.config.roles:
+            self.config.roles[role].provider = provider
+            if "model" in cmd.data:
+                self.config.roles[role].model = model
+            log.info(
+                "idle hot-swap: %s provider → %s model → %s",
+                role,
+                provider,
+                model or "(unchanged)",
+            )
+            if self._dispatcher is not None:
+                await self._dispatcher.emit(
+                    make_event(
+                        "provider_switch",
+                        role=role,
+                        data={"role": role, "provider": provider, "model": model},
+                        priority=True,
+                    )
+                )
+
     async def _run_legacy_agent(
         self, ctx: RunnerContext, shutdown_event: asyncio.Event | None = None
     ) -> None:
@@ -259,6 +293,12 @@ class Runner:
         )
 
         for attempt in range(state.retry_count, max_attempts):
+            # A47: check shutdown at the top of the outer retry loop so that a
+            # shutdown signal is honoured immediately on the next iteration even
+            # when no PAUSE is active.
+            if shutdown_event and shutdown_event.is_set():
+                log.info("shutdown requested — exiting retry loop")
+                return
             inject_prompt = ""
             if attempt > 0:
                 stuck = check_stuck(state, self.config.stuck_detection)
@@ -302,7 +342,7 @@ class Runner:
 
             override = await self._check_override()
             if override:
-                self._handle_override(override, state)
+                state = self._handle_override(override, state)
                 if state.phase == Phase.FAILED:
                     self._current_state = state
                     await self.notifier.notify("stopped by OVERRIDE.md", NotifyLevel.ERROR)
@@ -431,7 +471,7 @@ class Runner:
 
         if self.plan_file:
             try:
-                plan_content = self.plan_file.read_text()
+                plan_content = self.plan_file.read_text(encoding="utf-8")
             except FileNotFoundError as exc:
                 raise FileNotFoundError(
                     f"plan file not found: {self.plan_file}"
@@ -483,6 +523,9 @@ class Runner:
                 # Coach is non-fatal — previous strategic documents remain on disk.
                 log.warning("coach phase did not succeed (non-fatal): %s", coach_result.error)
 
+        slice_plan = None  # set below, before it is needed by run_execute
+        execute_already_done = _phase_already_done(state.sora_phase, SoraPhase.EXECUTE)
+
         if not _phase_already_done(state.sora_phase, SoraPhase.ARCHITECT):
             state = self.checkpoint.set_sora_phase(state, SoraPhase.ARCHITECT)
             self._current_state = state
@@ -496,11 +539,17 @@ class Runner:
                 await self.notifier.notify(msg, NotifyLevel.ERROR)
                 await self._emit_error(msg)
                 return
+            state = ctx.state
             slice_plan = result.data["slice_plan"]
-        else:
-            slice_plan = _load_slice_plan_from_disk(ctx, state.current_slice or "S01")
+        elif not execute_already_done:
+            # Architect was done but Execute was not — load the existing plan from disk
+            # for crash recovery.  The safe variant returns an empty SlicePlan when
+            # the file is missing; run_execute will then surface the "no tasks" error.
+            slice_plan = _load_slice_plan_from_disk_safe(ctx, state.current_slice or "S01")
+        # else: both Architect and Execute are done (e.g. SLICE_DONE) — slice_plan
+        # stays None because it is not needed for the current iteration.
 
-        if not _phase_already_done(state.sora_phase, SoraPhase.EXECUTE):
+        if not execute_already_done:
             state = self.checkpoint.set_sora_phase(state, SoraPhase.EXECUTE)
             self._current_state = state
             await self._emit_phase(SoraPhase.EXECUTE)
@@ -510,6 +559,8 @@ class Runner:
             exec_result = await run_execute(ctx, slice_plan)
             if not exec_result.success:
                 msg = f"Execute failed: {exec_result.error}"
+                state = self.checkpoint.mark_failed(state, msg)
+                self._current_state = state
                 await self.notifier.notify(msg, NotifyLevel.ERROR)
                 await self._emit_error(msg)
                 return
@@ -517,7 +568,8 @@ class Runner:
         max_slices = self.config.max_slices
         extra_slices_done = 0
         _slice_loop_completed = False
-        while extra_slices_done < max_slices:
+        limit_reached = False
+        while extra_slices_done < max_slices - 1:
             state = self.checkpoint.set_sora_phase(state, SoraPhase.SLICE_DONE)
             self._current_state = state
             await self._emit_phase(SoraPhase.SLICE_DONE)
@@ -545,6 +597,8 @@ class Runner:
             result = await run_architect(ctx, slice_id=next_slice)
             if not result.success:
                 msg = f"Architect failed on {next_slice}: {result.error}"
+                state = self.checkpoint.mark_failed(state, msg)
+                self._current_state = state
                 await self.notifier.notify(msg, NotifyLevel.ERROR)
                 await self._emit_error(msg)
                 break
@@ -559,10 +613,13 @@ class Runner:
             exec_result = await run_execute(ctx, slice_plan)
             if not exec_result.success:
                 msg = f"Execute failed on {next_slice}: {exec_result.error}"
+                state = self.checkpoint.mark_failed(state, msg)
+                self._current_state = state
                 await self.notifier.notify(msg, NotifyLevel.ERROR)
                 await self._emit_error(msg)
                 break
         else:
+            limit_reached = True
             msg = (
                 f"extra slice limit reached ({max_slices} additional slices beyond S01) "
                 f"— stopping. Check TASK_QUEUE.md."
@@ -634,6 +691,10 @@ class Runner:
                 log.info("idle: stop command received")
                 return
 
+            if cmd.kind == "switch_provider":
+                await self._apply_switch_provider(cmd)
+                continue
+
             if cmd.kind == "new_plan":
                 plan_text = cmd.data.get("text", "")
                 if not plan_text:
@@ -686,11 +747,15 @@ class Runner:
     _RE_STOP = re.compile(r"^\s*STOP\s*$", re.MULTILINE)
     _RE_PAUSE = re.compile(r"^\s*PAUSE\s*$", re.MULTILINE)
 
-    def _handle_override(self, content: str, state: AgentState) -> None:
+    def _handle_override(self, content: str, state: AgentState) -> AgentState:
         if self._RE_STOP.search(content):
-            state = self.checkpoint.mark_failed(state, "STOP directive in OVERRIDE.md")
-            self._current_state = state
-            return
+            new_state = self.checkpoint.mark_failed(state, "STOP directive in OVERRIDE.md")
+            object.__setattr__(state, "phase", new_state.phase)
+            self._current_state = new_state
+            return new_state
         if self._RE_PAUSE.search(content) and state.phase != Phase.PAUSED:
-            state = self.checkpoint.mark_paused(state, "PAUSE directive in OVERRIDE.md")
-            self._current_state = state
+            new_state = self.checkpoint.mark_paused(state, "PAUSE directive in OVERRIDE.md")
+            object.__setattr__(state, "phase", new_state.phase)
+            self._current_state = new_state
+            return new_state
+        return state

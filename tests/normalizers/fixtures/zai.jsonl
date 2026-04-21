@@ -1,0 +1,14 @@
+// Zai (Claude Agent SDK via api.z.ai) stream output — dict representation
+// Each line is one JSON object representing a Zai SDK event after pipeline
+// conversion. Zai uses the Claude Agent SDK with extended thinking enabled.
+// Real SDK objects are duck-typed (see test_zai.py for SDK-object tests).
+{"type": "text", "text": "Processing your request via GLM-5.1."}
+{"type": "thinking", "thinking": "The user wants me to analyze the runner. I should start by reading the file."}
+{"type": "tool_use", "id": "zai_toolu_01", "name": "bash", "input": {"command": "python -c \"import tero2; print(tero2.__file__)\""}}
+{"type": "tool_result", "tool_use_id": "zai_toolu_01", "content": "/Users/terobyte/Desktop/Projects/Active/tero2/tero2/__init__.py"}
+{"type": "tool_use", "id": "zai_toolu_02", "name": "read", "input": {"file_path": "/Users/terobyte/Desktop/Projects/Active/tero2/tero2/__init__.py"}}
+{"type": "tool_result", "tool_use_id": "zai_toolu_02", "content": [{"type": "text", "text": "\"\"\"tero2 \u2014 autonomous agent orchestration.\"\"\"\n"}]}
+{"type": "status", "text": "Running tool: bash"}
+{"type": "error", "error": "GLM-5.1: upstream connection reset"}
+{"type": "text", "text": "Analysis complete. The package initializes the SORA orchestration system."}
+{"type": "turn_end"}

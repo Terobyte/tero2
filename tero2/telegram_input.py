@@ -90,7 +90,11 @@ class TelegramInputBot:
             json={"offset": offset, "timeout": 30},
             timeout=35,  # slightly longer than long-poll timeout
         )
-        data = resp.json()
+        try:
+            data = resp.json()
+        except Exception:
+            log.warning("poll_once: failed to decode JSON response, skipping")
+            return [], offset
         updates = data.get("result", [])
         if updates:
             offset = updates[-1]["update_id"] + 1
@@ -111,7 +115,11 @@ class TelegramInputBot:
         if document:
             file_name = document.get("file_name", "")
             if file_name.endswith(".md"):
-                content = await self._download_file(document["file_id"])
+                file_id = document.get("file_id")
+                if not file_id:
+                    await self.notifier.send("Malformed document: missing file_id.", NotifyLevel.PROGRESS)
+                    return
+                content = await self._download_file(file_id)
                 if content:
                     await self._handle_plan(content, chat_id)
                     return
@@ -199,8 +207,9 @@ class TelegramInputBot:
 
             # Re-check paused state after dequeueing
             if self._paused:
-                # Put the plan back and wait
+                # Put the plan back, mark the dequeued item done, and wait
                 await self._plan_queue.put((project_name, plan_content))
+                self._plan_queue.task_done()
                 await asyncio.sleep(1.0)
                 continue
 
@@ -225,8 +234,7 @@ class TelegramInputBot:
                     NotifyLevel.ERROR,
                 )
             finally:
-                if not self._paused:
-                    self._plan_queue.task_done()
+                self._plan_queue.task_done()
 
     async def _launch_runner(self, project_path: Path) -> None:
         """Launch tero2 runner as a subprocess for the given project.
@@ -274,6 +282,8 @@ class TelegramInputBot:
             return False
         return str(chat_id) in self._allowed_ids
 
+    _MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
     async def _download_file(self, file_id: str) -> str | None:
         """Download a file from Telegram by file_id. Returns content as string."""
         try:
@@ -282,8 +292,14 @@ class TelegramInputBot:
                 requests.post, url, json={"file_id": file_id}, timeout=10
             )
             data = resp.json()
-            file_path = data.get("result", {}).get("file_path")
+            result = data.get("result", {})
+            file_path = result.get("file_path")
             if not file_path:
+                return None
+
+            file_size = result.get("file_size", 0)
+            if file_size and file_size > self._MAX_FILE_SIZE:
+                log.warning("file too large (%d bytes), rejecting", file_size)
                 return None
 
             download_url = (
@@ -296,3 +312,7 @@ class TelegramInputBot:
         except Exception:
             log.error("file download failed", exc_info=True)
             return None
+
+
+# Alias for backwards compatibility and test imports
+TelegramInput = TelegramInputBot

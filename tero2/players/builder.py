@@ -83,7 +83,7 @@ class BuilderPlayer(BasePlayer):
 
             summary = output.strip()
             if not summary:
-                summary = _recover_summary_from_disk(task_id, self.working_dir)
+                summary = self._recover_summary_from_disk(task_id, self.working_dir)
             if not summary:
                 return BuilderResult(
                     success=False,

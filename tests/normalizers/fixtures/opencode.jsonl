@@ -1,0 +1,12 @@
+// OpenCode CLI opencode run --format json captured output (synthetic fixture)
+// Each line is one JSON object as emitted by the opencode process stdout.
+// OpenCode uses "event" as the discriminator key (not "type"),
+// "args" for tool inputs, "result" for tool outputs, "end" for stream termination.
+{"event": "message", "role": "assistant", "text": "Starting implementation of the requested changes."}
+{"event": "tool_call", "name": "bash", "args": {"command": "find . -name '*.py' -not -path './.venv/*'"}, "id": "oc_tool_001"}
+{"event": "tool_result", "id": "oc_tool_001", "result": "./tero2/runner.py\n./tero2/config.py\n./tero2/events.py"}
+{"event": "tool_call", "name": "write", "args": {"path": "/repo/out.py", "content": "# generated\n"}, "id": "oc_tool_002"}
+{"event": "tool_result", "id": "oc_tool_002", "result": "File written: /repo/out.py"}
+{"event": "error", "message": "model returned empty response"}
+{"event": "message", "role": "assistant", "text": "I've written the output file and found all Python sources."}
+{"event": "end"}

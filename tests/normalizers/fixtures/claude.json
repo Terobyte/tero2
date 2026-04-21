@@ -1,0 +1,71 @@
+[
+  {
+    "_comment": "Standard assistant text",
+    "type": "text",
+    "text": "I'll analyze the codebase structure for you."
+  },
+  {
+    "_comment": "Extended thinking block",
+    "type": "thinking",
+    "thinking": "Let me first inspect the directory layout, then identify the key entry points."
+  },
+  {
+    "_comment": "Status before tool execution",
+    "type": "status",
+    "text": "Running bash..."
+  },
+  {
+    "_comment": "Tool invocation with nested input dict",
+    "type": "tool_use",
+    "id": "toolu_01AbcDefGhi",
+    "name": "bash",
+    "input": {"command": "ls -la /repo"}
+  },
+  {
+    "_comment": "Tool result — plain string content",
+    "type": "tool_result",
+    "tool_use_id": "toolu_01AbcDefGhi",
+    "content": "total 48\ndrwxr-xr-x  12 user user  384 Apr 20 09:00 ."
+  },
+  {
+    "_comment": "Tool result — content wrapped in list (Claude MCP style)",
+    "type": "tool_result",
+    "tool_use_id": "toolu_02XyzWvuTsr",
+    "content": [
+      {"type": "text", "text": "README.md"},
+      {"type": "text", "text": "pyproject.toml"}
+    ]
+  },
+  {
+    "_comment": "Read tool invocation",
+    "type": "tool_use",
+    "id": "toolu_03MnoPqrStu",
+    "name": "read",
+    "input": {"file_path": "/repo/tero2/runner.py"}
+  },
+  {
+    "_comment": "Tool result with multi-line content",
+    "type": "tool_result",
+    "tool_use_id": "toolu_03MnoPqrStu",
+    "content": "\"\"\"Runner — orchestrates the SORA player loop.\"\"\"\n\nfrom __future__ import annotations\n"
+  },
+  {
+    "_comment": "Error using 'error' key (not 'text')",
+    "type": "error",
+    "error": "Context window exceeded — compaction triggered"
+  },
+  {
+    "_comment": "Error using 'text' key (alternate shape)",
+    "type": "error",
+    "text": "API rate limit exceeded, retrying in 5s"
+  },
+  {
+    "_comment": "Final text before turn end",
+    "type": "text",
+    "text": "I've completed the analysis. The main entry point is tero2/runner.py."
+  },
+  {
+    "_comment": "Stream terminator",
+    "type": "turn_end"
+  }
+]

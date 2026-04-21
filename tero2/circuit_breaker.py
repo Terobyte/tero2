@@ -37,8 +37,19 @@ class CircuitBreaker:
             raise CircuitOpenError(self.name)
         if self.state == CBState.HALF_OPEN:
             if self._trial_in_progress:
-                raise CircuitOpenError(self.name)
+                # Allow a new probe only when recovery_timeout_s > 0 and the
+                # timeout has elapsed again since last_failure_time (abandoned
+                # trial case). When recovery_timeout_s == 0, block immediately
+                # so only one probe is allowed per HALF_OPEN window.
+                if (
+                    self.recovery_timeout_s > 0
+                    and time.monotonic() - self.last_failure_time > self.recovery_timeout_s
+                ):
+                    self._trial_in_progress = False
+                else:
+                    raise CircuitOpenError(self.name)
             self._trial_in_progress = True
+            self.last_failure_time = time.monotonic()
             return
 
     def record_success(self) -> None:

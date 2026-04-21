@@ -1,0 +1,15 @@
+// Kilo CLI "kilo run --format json" captured output (synthetic fixture)
+// Each line is one JSON object as emitted by the kilo process stdout.
+// Kilo uses "type" as the discriminator key, "input" for tool args,
+// "tool_use_id" for result correlation, and sequential kilo_NN IDs.
+// List content in tool_result is Kilo-specific — bash result is plain string.
+{"type": "text", "text": "I'll inspect the project and propose changes."}
+{"type": "status", "text": "Initializing session..."}
+{"type": "tool_use", "id": "kilo_01", "name": "bash", "input": {"command": "cat pyproject.toml"}}
+{"type": "tool_result", "tool_use_id": "kilo_01", "content": "[project]\nname = \"tero2\"\nversion = \"0.1.0\""}
+{"type": "tool_use", "id": "kilo_02", "name": "glob", "input": {"pattern": "tests/**/*.py"}}
+{"type": "tool_result", "tool_use_id": "kilo_02", "content": [{"type": "text", "text": "tests/test_bugs.py"}, {"type": "text", "text": "tests/test_runner_sora.py"}]}
+{"type": "kilo_internal_checkpoint", "text": "checkpoint saved"}
+{"type": "error", "error": "tool execution timeout after 30s"}
+{"type": "text", "text": "Done. Found 12 test files."}
+{"type": "turn_end"}

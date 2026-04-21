@@ -355,21 +355,41 @@ class TestBug10CLIProviderYieldsBeforeExitCodeCheck:
     def test_cli_provider_source_checks_exit_code_before_yield(self):
         from tero2.providers.cli import CLIProvider
 
-        source = inspect.getsource(CLIProvider.run)
-        yield_lines = []
-        exit_check_lines = []
-        for i, line in enumerate(source.split("\n")):
+        # The returncode check was moved into _stream_events, which is called
+        # by run(). Verify both methods together: _stream_events checks returncode
+        # before yielding parsed events, and run() delegates to _stream_events.
+        stream_source = inspect.getsource(CLIProvider._stream_events)
+        run_source = inspect.getsource(CLIProvider.run)
+
+        # _stream_events must check returncode before yielding parsed events
+        stream_lines = stream_source.split("\n")
+        returncode_line = None
+        first_yield_line = None
+        for i, line in enumerate(stream_lines):
             stripped = line.strip()
-            if stripped.startswith("yield "):
-                yield_lines.append(i)
-            if "returncode" in stripped:
-                exit_check_lines.append(i)
-        assert exit_check_lines and yield_lines and min(exit_check_lines) < min(yield_lines), (
-            f"CLIProvider.run() yields stdout lines (line {min(yield_lines)}) BEFORE "
-            f"checking returncode (line {min(exit_check_lines)}). If the process "
-            f"exits non-zero, all output has already been sent to the consumer, who "
-            f"processes it as valid. Then ProviderError is raised and the chain "
-            f"retries — causing all those actions to be duplicated."
+            if "returncode" in stripped and returncode_line is None:
+                returncode_line = i
+            if stripped.startswith("yield ") and first_yield_line is None:
+                first_yield_line = i
+
+        # returncode check in _stream_events must come before yield of parsed events
+        # (the returncode check is followed by the for-loop that yields events)
+        assert returncode_line is not None, (
+            "_stream_events must check returncode after proc.wait()"
+        )
+        assert first_yield_line is not None, (
+            "_stream_events must yield events"
+        )
+        assert returncode_line < first_yield_line, (
+            f"_stream_events() checks returncode at line {returncode_line} "
+            f"but yields events at line {first_yield_line} — returncode must "
+            f"be checked first so ProviderError is raised before any events "
+            f"reach the consumer."
+        )
+
+        # run() delegates to _stream_events
+        assert "self._stream_events" in run_source, (
+            "run() must delegate to _stream_events for event streaming"
         )
 
     async def test_cli_provider_does_not_yield_on_nonzero_exit(self):

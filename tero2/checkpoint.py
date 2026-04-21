@@ -88,6 +88,7 @@ class CheckpointManager:
 
     def increment_step(self, state: AgentState) -> AgentState:
         state.steps_in_task += 1
+        state.touch()
         self.save(state)
         return state
 

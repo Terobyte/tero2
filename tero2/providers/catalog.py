@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -95,8 +97,10 @@ def _cache_path(cli: str) -> Path:
 def _load_cache(cli: str) -> list[ModelEntry] | None:
     p = _cache_path(cli)
     try:
-        raw = json.loads(p.read_text())
+        raw = json.loads(p.read_text(encoding="utf-8"))
         fetched_at = datetime.fromisoformat(raw["fetched_at"])
+        if fetched_at.tzinfo is None:
+            fetched_at = fetched_at.replace(tzinfo=timezone.utc)
         age = (datetime.now(timezone.utc) - fetched_at).total_seconds()
         if age > _CACHE_TTL_S:
             return None
@@ -113,8 +117,8 @@ def _save_cache(cli: str, entries: list[ModelEntry]) -> None:
             "fetched_at": datetime.now(timezone.utc).isoformat(),
             "entries": [{"id": e.id, "label": e.label} for e in entries],
         }
-        tmp = p.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False))
+        tmp = p.with_name(f"{p.stem}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         tmp.replace(p)
     except OSError as e:
         log.warning("cache write failed for %s: %s", cli, e)
@@ -122,12 +126,17 @@ def _save_cache(cli: str, entries: list[ModelEntry]) -> None:
 
 async def get_models(cli: str, free_only: bool = False) -> list[ModelEntry]:
     if cli not in _DYNAMIC_PROVIDERS:
-        return STATIC_CATALOG.get(cli, [])
+        if cli not in STATIC_CATALOG:
+            raise KeyError(f"unknown provider: {cli!r}")
+        return STATIC_CATALOG[cli]
     cached = _load_cache(cli)
     if cached is not None:
         if free_only:
             return [m for m in cached if ":free" in m.id]
         return cached
-    entries = await fetch_cli_models(cli, free_only=free_only)
-    _save_cache(cli, entries)
-    return entries
+    # Always fetch all models and cache the full set; filter after caching.
+    all_entries = await fetch_cli_models(cli, free_only=False)
+    _save_cache(cli, all_entries)
+    if free_only:
+        return [m for m in all_entries if ":free" in m.id]
+    return all_entries

@@ -29,7 +29,7 @@ class NotifyLevel(str, Enum):
 class Notifier:
     def __init__(self, config: TelegramConfig) -> None:
         self.config = config
-        self._enabled = bool(config.bot_token and config.chat_id)
+        self._enabled = bool(config.enabled and config.bot_token and config.chat_id)
 
     async def send(self, text: str, level: NotifyLevel = NotifyLevel.PROGRESS) -> bool:
         if not self._enabled:
@@ -73,9 +73,9 @@ class Notifier:
     async def notify(self, text: str, level: NotifyLevel = NotifyLevel.PROGRESS) -> bool:
         try:
             ok = await self.send(text, level)
-            if level == NotifyLevel.DONE and self.config.voice_on_done:
+            if ok and level == NotifyLevel.DONE and self.config.voice_on_done:
                 await self.send_voice(text)
-            elif level == NotifyLevel.STUCK and self.config.voice_on_stuck:
+            elif ok and level == NotifyLevel.STUCK and self.config.voice_on_stuck:
                 await self.send_voice(text)
             return ok
         except Exception:

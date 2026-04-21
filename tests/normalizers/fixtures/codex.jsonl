@@ -1,0 +1,12 @@
+// Codex CLI codex exec --json captured output (synthetic fixture)
+// Each line is one JSON object as emitted by the codex process stdout.
+// Codex uses type=text (with "content"), type=tool (for invocations),
+// type=tool_output (for results), type=done (stream end), type=error.
+{"type": "text", "content": "I'll help you implement the requested feature."}
+{"type": "tool", "name": "bash", "id": "call_Abc123Xyz", "input": {"cmd": "git log --oneline -5"}}
+{"type": "tool_output", "id": "call_Abc123Xyz", "output": "a1b2c3d fix: resolve race condition\ne4f5g6h add: unit tests for runner"}
+{"type": "tool", "name": "apply_patch", "id": "call_Def456Uvw", "input": {"patch": "--- a/tero2/runner.py\n+++ b/tero2/runner.py\n@@ -1,3 +1,4 @@\n+# patched\n"}}
+{"type": "tool_output", "id": "call_Def456Uvw", "output": "Applied successfully."}
+{"type": "text", "content": "Patch applied. Moving to next step."}
+{"type": "error", "message": "sandbox: command not permitted"}
+{"type": "done"}

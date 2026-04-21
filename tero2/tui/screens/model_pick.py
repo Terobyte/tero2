@@ -38,6 +38,8 @@ class ModelPickScreen(ModalScreen[ModelEntry | None]):
             classes="screen-title",
         )
         yield Input(placeholder="Поиск модели…", id="model-search")
+        if not self._all_entries:
+            yield Label("No models found — check provider configuration", classes="info-msg")
         lv_items = [
             ListItem(
                 Label(e.label, classes="model-label"),
@@ -80,9 +82,18 @@ class ModelPickScreen(ModalScreen[ModelEntry | None]):
     def action_cancel(self) -> None:
         self.dismiss(None)
 
+    def action_select_current(self) -> None:
+        lv = self.query_one("#model-list", ListView)
+        idx = lv.index
+        if idx is not None and 0 <= idx < len(self._filtered):
+            self.dismiss(self._filtered[idx])
+        else:
+            self.notify("No models available — refine your search", severity="warning")
+
     def on_mount(self) -> None:
         """Focus the list so Enter immediately selects without an extra Tab."""
-        self.query_one("#model-list", ListView).focus()
+        if self._filtered:
+            self.query_one("#model-list", ListView).focus()
 
     def action_focus_search(self) -> None:
         self.query_one("#model-search", Input).focus()

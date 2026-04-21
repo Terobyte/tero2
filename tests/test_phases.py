@@ -565,13 +565,11 @@ class TestReadNextSlice:
 
 class TestLoadSlicePlanFromDisk:
     def test_returns_empty_plan_when_no_file(self, tmp_path: Path):
-        from tero2.players.architect import SlicePlan
+        import pytest
 
         ctx = _make_ctx(tmp_path)
-        plan = _load_slice_plan_from_disk(ctx, "S01")
-        assert isinstance(plan, SlicePlan)
-        assert plan.slice_id == "S01"
-        assert plan.tasks == []
+        with pytest.raises(ValueError):
+            _load_slice_plan_from_disk(ctx, "S01")
 
     def test_parses_plan_from_disk(self, tmp_path: Path):
         ctx = _make_ctx(tmp_path)

@@ -63,5 +63,9 @@ def project_lock(sora_dir: Path):
     try:
         yield
     finally:
-        lock.release()
+        try:
+            lock.release()
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning("lock release failed", exc_info=True)
 

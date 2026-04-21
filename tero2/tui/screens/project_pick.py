@@ -19,6 +19,7 @@ class ProjectPickScreen(ModalScreen[Path | None]):
 
     BINDINGS: ClassVar[list] = [
         Binding("n", "manual_input", "Ввести путь"),
+        Binding("d", "delete_entry", "Удалить"),
         Binding("escape,q", "cancel", "Выход", show=False),
     ]
 
@@ -26,6 +27,7 @@ class ProjectPickScreen(ModalScreen[Path | None]):
         super().__init__()
         self._entries: list[HistoryEntry] = load_history()
         self._manual_mode = False
+        self._pending_delete: int | None = None
 
     def compose(self) -> ComposeResult:
         yield Static("tero2 — выбор проекта", classes="screen-title")
@@ -73,6 +75,32 @@ class ProjectPickScreen(ModalScreen[Path | None]):
             self.query_one("#path-input")
         except NoMatches:
             self.mount(Input(placeholder="Путь к проекту…", id="path-input"))
+
+    def action_delete_entry(self) -> None:
+        try:
+            lv = self.query_one("#project-list", ListView)
+        except NoMatches:
+            return
+        idx = lv.index
+        if idx is None or not (0 <= idx < len(self._entries)):
+            return
+        if self._pending_delete == idx:
+            # Second press: confirm and delete
+            self._entries.pop(idx)
+            self._pending_delete = None
+            from tero2.history import _write
+            _write(self._entries)
+            lv.clear()
+            for item in self._build_items():
+                lv.append(item)
+            self.notify("Запись удалена", severity="information")
+        else:
+            self._pending_delete = idx
+            entry = self._entries[idx]
+            self.notify(
+                f"Нажмите [d] ещё раз для подтверждения удаления «{entry.name}»",
+                severity="warning",
+            )
 
     def action_cancel(self) -> None:
         self.dismiss(None)

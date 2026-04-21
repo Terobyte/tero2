@@ -1,0 +1,60 @@
+[
+  {
+    "_comment": "Assistant text",
+    "type": "text",
+    "text": "I'll inspect the project and propose changes."
+  },
+  {
+    "_comment": "Status — kilo uses same format as opencode",
+    "type": "status",
+    "text": "Initializing session..."
+  },
+  {
+    "_comment": "Bash tool call",
+    "type": "tool_use",
+    "id": "kilo_01",
+    "name": "bash",
+    "input": {"command": "cat pyproject.toml"}
+  },
+  {
+    "_comment": "Bash result",
+    "type": "tool_result",
+    "tool_use_id": "kilo_01",
+    "content": "[project]\nname = \"tero2\"\nversion = \"0.1.0\""
+  },
+  {
+    "_comment": "Glob tool call",
+    "type": "tool_use",
+    "id": "kilo_02",
+    "name": "glob",
+    "input": {"pattern": "tests/**/*.py"}
+  },
+  {
+    "_comment": "Glob result — list content (kilo wraps in list)",
+    "type": "tool_result",
+    "tool_use_id": "kilo_02",
+    "content": [
+      {"type": "text", "text": "tests/test_bugs.py"},
+      {"type": "text", "text": "tests/test_runner_sora.py"}
+    ]
+  },
+  {
+    "_comment": "Kilo-specific unknown event type falls back to text",
+    "type": "kilo_internal_checkpoint",
+    "text": "checkpoint saved"
+  },
+  {
+    "_comment": "Error event",
+    "type": "error",
+    "error": "tool execution timeout after 30s"
+  },
+  {
+    "_comment": "Completion text",
+    "type": "text",
+    "text": "Done. Found 12 test files."
+  },
+  {
+    "_comment": "Stream terminator",
+    "type": "turn_end"
+  }
+]

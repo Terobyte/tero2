@@ -322,9 +322,9 @@ class TestSetSoraPhase:
         """save() is called internally, so last_checkpoint is updated."""
         cm, disk = self._make_checkpoint(tmp_path)
         state = AgentState()
-        before = state.last_checkpoint
+        initial = state.last_checkpoint
         updated = cm.set_sora_phase(state, SoraPhase.COACH)
-        assert updated.last_checkpoint != before or updated.last_checkpoint != ""
+        assert updated.last_checkpoint != initial and updated.last_checkpoint != ""
 
     def test_set_sora_phase_returns_same_object(self, tmp_path):
         """set_sora_phase mutates and returns the passed-in state object."""

@@ -34,6 +34,7 @@ class ShellProvider(BaseProvider):
             stdout, stderr = await proc.communicate()
         except Exception:
             proc.terminate()
+            await proc.wait()
             raise
         if proc.returncode != 0:
             err_msg = stderr.decode(errors="replace").strip()

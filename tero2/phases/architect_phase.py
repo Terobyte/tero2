@@ -75,11 +75,15 @@ async def run_architect(
         # Update state to track which slice we just planned
         ctx.state.current_slice = slice_id
         ctx.checkpoint.save(ctx.state)
+        return PhaseResult(
+            success=True,
+            error=result.error,
+            data={"slice_plan": result.slice_plan},
+        )
     else:
         log.error("architect failed (fatal for slice %s): %s", slice_id, result.error)
-
-    return PhaseResult(
-        success=result.success,
-        error=result.error,
-        data={"slice_plan": result.slice_plan},
-    )
+        return PhaseResult(
+            success=False,
+            error=result.error,
+            data=None,
+        )

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import pathlib
 from dataclasses import dataclass
 from typing import Any
 
@@ -63,7 +64,7 @@ class ScoutPlayer(BasePlayer):
 
         try:
             project_md = self._read_project_md()
-            file_tree = _build_file_tree(self.working_dir or ".")
+            file_tree = build_file_tree(self.working_dir or ".")
             content_prompt = self._build_prompt(project_md, file_tree)
             prompt = f"{persona_prompt}\n\n---\n\n{content_prompt}" if persona_prompt else content_prompt
             output = await self._run_prompt(prompt)
@@ -132,16 +133,22 @@ class ScoutPlayer(BasePlayer):
         return ScoutPlayer._build_prompt(project_md="", file_tree="")
 
 
-def _build_file_tree(working_dir: str, max_depth: int = 2) -> str:
+def build_file_tree(working_dir: str, max_depth: int = 2) -> str:
     """Return a compact directory listing (max *max_depth* levels).
 
     Hidden directories and common noise dirs (``_SKIP_DIRS``) are excluded.
     Files are listed with a leading ``├─`` / ``└─`` prefix for readability.
+    Symlinks are shown with a ``->`` marker and are not traversed (A38 fix).
     """
     lines: list[str] = []
     root_path = os.path.abspath(working_dir)
+    visited: set[str] = set()
 
     def _walk(path: str, prefix: str, depth: int) -> None:
+        real = os.path.realpath(path)
+        if real in visited:
+            return
+        visited.add(real)
         if depth > max_depth:
             return
         try:
@@ -157,8 +164,25 @@ def _build_file_tree(working_dir: str, max_depth: int = 2) -> str:
         for i, entry in enumerate(entries):
             connector = "└─" if i == len(entries) - 1 else "├─"
             full = os.path.join(path, entry)
+            # Detect symlinks and show them with -> marker (A38 fix).
+            try:
+                is_link = os.path.islink(full)
+            except (PermissionError, OSError):
+                is_link = False
+            if is_link:
+                try:
+                    target = os.readlink(full)
+                except OSError:
+                    target = "?"
+                lines.append(f"{prefix}{connector} {entry} -> {target}")
+                # Do not traverse into symlinks to avoid cross-boundary traversal.
+                continue
             lines.append(f"{prefix}{connector} {entry}")
-            if os.path.isdir(full):
+            try:
+                is_dir = os.path.isdir(full)
+            except (PermissionError, OSError):
+                is_dir = False
+            if is_dir:
                 extension = "   " if i == len(entries) - 1 else "│  "
                 _walk(full, prefix + extension, depth + 1)
 
@@ -167,9 +191,13 @@ def _build_file_tree(working_dir: str, max_depth: int = 2) -> str:
     return "\n".join(lines)
 
 
-def _count_files(working_dir: str) -> int:
+def _count_files(working_dir: str, max_depth: int = 2) -> int:
     count = 0
-    for _root, _dirs, files in os.walk(working_dir):
-        _dirs[:] = [d for d in _dirs if d not in _SKIP_DIRS]
+    base = pathlib.Path(working_dir)
+    for root, dirs, files in os.walk(working_dir):
+        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and not d.startswith(".")]
+        depth = len(pathlib.Path(root).relative_to(base).parts)
+        if depth >= max_depth:
+            dirs.clear()
         count += sum(1 for f in files if not f.startswith("."))
     return count

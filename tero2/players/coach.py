@@ -125,12 +125,11 @@ class CoachPlayer(BasePlayer):
                 if content:
                     entry = f"### {sid}/{tid}\n{content}"
                     if total_size + len(entry) > _SIZE_CAP:
+                        # Cap reached for this slice; stop reading tasks in this
+                        # slice but continue to the next slice.
                         break
                     summaries.append(entry)
                     total_size += len(entry)
-            else:
-                continue
-            break  # inner break propagates to outer loop
 
         metrics_raw = self.disk.read_metrics()
         metrics_str = json.dumps(metrics_raw, indent=2) if metrics_raw else ""

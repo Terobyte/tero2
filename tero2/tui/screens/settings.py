@@ -20,7 +20,7 @@ from textual.widgets import (
     TabPane,
 )
 
-from tero2.config_writer import write_global_config_section
+from tero2.config_writer import _load_toml, write_global_config_section
 
 _GLOBAL_CONFIG = Path.home() / ".tero2" / "config.toml"
 
@@ -38,6 +38,8 @@ class SettingsScreen(ModalScreen[None]):
     def __init__(self, config_path: Path | None = None) -> None:
         super().__init__()
         self._config_path = config_path or _GLOBAL_CONFIG
+        self._dirty: bool = False
+        self._loading: bool = False
 
     def compose(self) -> ComposeResult:
         yield Static(
@@ -71,6 +73,39 @@ class SettingsScreen(ModalScreen[None]):
 
         yield Footer()
 
+    def on_mount(self) -> None:
+        self._loading = True
+        data = _load_toml(self._config_path)
+        tg = data.get("telegram", {})
+        try:
+            self.query_one("#tg-enabled", Checkbox).value = bool(tg.get("enabled", False))
+            self.query_one("#tg-token", Input).value = tg.get("bot_token", "")
+            self.query_one("#tg-chat-ids", Input).value = ", ".join(
+                tg.get("allowed_chat_ids", [])
+            )
+            self.query_one("#tg-voice", Checkbox).value = bool(tg.get("voice_on_done", True))
+        except NoMatches:
+            pass
+        sora = data.get("sora", {})
+        try:
+            self.query_one("#max-slices", Input).value = str(sora.get("max_slices", 12))
+            self.query_one("#idle-timeout", Input).value = str(sora.get("idle_timeout_s", 0))
+        except NoMatches:
+            pass
+        self.call_after_refresh(self._clear_loading_flag)
+
+    def _clear_loading_flag(self) -> None:
+        self._loading = False
+        self._dirty = False
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if not self._loading:
+            self._dirty = True
+
+    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
+        if not self._loading:
+            self._dirty = True
+
     def action_save(self) -> None:
         try:
             self._do_save()
@@ -89,12 +124,12 @@ class SettingsScreen(ModalScreen[None]):
         except NoMatches:
             pass  # tab not rendered — skip section
         else:
+            chat_ids = [c.strip() for c in chat_ids_in.value.split(",") if c.strip()]
             write_global_config_section(self._config_path, "telegram", {
                 "enabled": enabled_cb.value,
                 "bot_token": token_in.value,
-                "allowed_chat_ids": [
-                    c.strip() for c in chat_ids_in.value.split(",") if c.strip()
-                ],
+                "chat_id": chat_ids[0] if chat_ids else "",
+                "allowed_chat_ids": chat_ids,
                 "voice_on_done": voice_cb.value,
             })
 
@@ -113,4 +148,7 @@ class SettingsScreen(ModalScreen[None]):
             write_global_config_section(self._config_path, "sora", sora_data)
 
     def action_cancel(self) -> None:
+        if self._dirty:
+            self.notify("Unsaved changes — press [s] to save first", severity="warning")
+            return
         self.dismiss(None)

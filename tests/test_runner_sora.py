@@ -204,7 +204,7 @@ class TestSliceLoopControlFlow:
             patch("tero2.runner.run_architect", new_callable=AsyncMock) as mock_architect,
             patch("tero2.runner.run_execute", new_callable=AsyncMock) as mock_execute,
             patch("tero2.runner.run_coach", new_callable=AsyncMock),
-            patch("tero2.runner._read_next_slice", return_value="S02"),
+            patch("tero2.runner._read_next_slice", side_effect=["S02", None]),
         ):
             mock_architect.side_effect = _architect_side_effect
             mock_execute.side_effect = _execute_side_effect
@@ -237,7 +237,7 @@ class TestCrashRecoverySliceDone:
             patch("tero2.runner.run_architect", new_callable=AsyncMock) as mock_architect,
             patch("tero2.runner.run_harden", new_callable=AsyncMock),
             patch("tero2.runner.run_scout", new_callable=AsyncMock),
-            patch("tero2.runner._read_next_slice", return_value=None),
+            patch("tero2.runner._read_next_slice", side_effect=[None]),
         ):
             mock_architect.return_value = PhaseResult(
                 success=True, data={"slice_plan": _slice_plan()}
@@ -306,7 +306,7 @@ class TestCrashRecoverySliceDone:
             patch("tero2.runner.run_architect", new_callable=AsyncMock),
             patch("tero2.runner.run_harden", new_callable=AsyncMock),
             patch("tero2.runner.run_scout", new_callable=AsyncMock),
-            patch("tero2.runner._read_next_slice", return_value=None),
+            patch("tero2.runner._read_next_slice", side_effect=[None]),
         ):
             mock_execute.return_value = PhaseResult(
                 success=True, data={"slice_id": "S01", "completed": {}}
@@ -337,7 +337,7 @@ class TestEventEmissions:
             patch("tero2.runner.run_architect", new_callable=AsyncMock) as mock_architect,
             patch("tero2.runner.run_execute", new_callable=AsyncMock) as mock_execute,
             patch("tero2.runner.run_coach", new_callable=AsyncMock),
-            patch("tero2.runner._read_next_slice", return_value=None),
+            patch("tero2.runner._read_next_slice", side_effect=[None]),
         ):
             mock_architect.return_value = PhaseResult(
                 success=True, data={"slice_plan": _slice_plan()}
@@ -440,7 +440,7 @@ class TestCommandQueue:
             patch("tero2.runner.run_architect", new_callable=AsyncMock) as mock_architect,
             patch("tero2.runner.run_execute", new_callable=AsyncMock) as mock_execute,
             patch("tero2.runner.run_coach", new_callable=AsyncMock),
-            patch("tero2.runner._read_next_slice", return_value=None),
+            patch("tero2.runner._read_next_slice", side_effect=[None]),
         ):
             mock_architect.return_value = PhaseResult(
                 success=True, data={"slice_plan": _slice_plan()}
@@ -488,7 +488,7 @@ class TestCommandQueue:
             patch("tero2.runner.run_coach", new_callable=AsyncMock),
             patch("tero2.runner.run_harden", new_callable=AsyncMock),
             patch("tero2.runner.run_scout", new_callable=AsyncMock),
-            patch("tero2.runner._read_next_slice", return_value="S02"),
+            patch("tero2.runner._read_next_slice", side_effect=["S02", None]),
         ):
             mock_architect.side_effect = _architect_with_stop
             mock_execute.return_value = PhaseResult(

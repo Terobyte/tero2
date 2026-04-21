@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import ClassVar
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal
+from textual.css.query import NoMatches
 from textual.widgets import Footer, Header
 from textual.worker import WorkerState
 
@@ -20,6 +22,8 @@ from tero2.tui.widgets.stuck_hint import StuckHintWidget
 from tero2.tui.widgets.log_view import LogView
 from tero2.tui.widgets.pipeline import PipelinePanel
 from tero2.tui.widgets.usage import UsagePanel
+
+log = logging.getLogger(__name__)
 
 
 class DashboardApp(App):
@@ -78,6 +82,10 @@ class DashboardApp(App):
         self._runner_worker = self.run_worker(self._run_runner(), exclusive=True)
         self.run_worker(self._consume_events(), exclusive=False)
 
+    def on_unmount(self) -> None:
+        if self._event_queue is not None:
+            self._dispatcher.unsubscribe(self._event_queue)
+
     # ── workers ──────────────────────────────────────────────────────────────
 
     async def _run_runner(self) -> None:
@@ -93,51 +101,57 @@ class DashboardApp(App):
         while True:
             event = await self._event_queue.get()
 
-            pipeline = self.query_one("#pipeline", PipelinePanel)
-            log_view = self.query_one("#log-view", LogView)
-            usage_panel = self.query_one("#usage-panel", UsagePanel)
-            stuck_hint = self.query_one("#stuck-hint", StuckHintWidget)
+            try:
+                pipeline = self.query_one("#pipeline", PipelinePanel)
+                log_view = self.query_one("#log-view", LogView)
+                usage_panel = self.query_one("#usage-panel", UsagePanel)
+                stuck_hint = self.query_one("#stuck-hint", StuckHintWidget)
+            except NoMatches:
+                continue
 
             # route by event kind
-            if event.kind == "phase_change":
-                sora_phase_val = event.data.get("sora_phase", SoraPhase.NONE.value)
-                try:
-                    phase = SoraPhase(sora_phase_val)
-                except ValueError:
-                    phase = SoraPhase.NONE
-                pipeline.update_phase(phase)
-                if event.role:
-                    pipeline.update_role_status(event.role, "активно")
+            try:
+                if event.kind == "phase_change":
+                    sora_phase_val = event.data.get("sora_phase", SoraPhase.NONE.value)
+                    try:
+                        phase = SoraPhase(sora_phase_val)
+                    except ValueError:
+                        phase = SoraPhase.NONE
+                    pipeline.update_phase(phase)
+                    if event.role:
+                        pipeline.update_role_status(event.role, "активно")
 
-            elif event.kind == "step":
-                if event.role:
-                    pipeline.update_role_status(event.role, "активно")
+                elif event.kind == "step":
+                    if event.role:
+                        pipeline.update_role_status(event.role, "активно")
 
-            elif event.kind == "stuck":
-                pipeline.stuck_mode = True
-                stuck_hint.display = True
+                elif event.kind == "stuck":
+                    pipeline.stuck_mode = True
+                    stuck_hint.display = True
 
-            elif event.kind == "done":
-                log_view.push_message("Задание выполнено.", style="green bold")
-                pipeline.stuck_mode = False
-                stuck_hint.display = False
+                elif event.kind == "done":
+                    log_view.push_message("Задание выполнено.", style="green bold")
+                    pipeline.stuck_mode = False
+                    stuck_hint.display = False
 
-            elif event.kind == "error":
-                msg = event.data.get("message") or event.data.get("msg") or "ошибка"
-                log_view.push_message(f"Ошибка: {msg}", style="red bold")
+                elif event.kind == "error":
+                    msg = event.data.get("message") or event.data.get("msg") or "ошибка"
+                    log_view.push_message(f"Ошибка: {msg}", style="red bold")
 
-            elif event.kind == "provider_switch":
-                role = event.role or event.data.get("role", "")
-                provider = event.data.get("provider", "")
-                log_view.push_message(
-                    f"Провайдер изменён: {role} → {provider}", style="cyan"
-                )
+                elif event.kind == "provider_switch":
+                    role = event.role or event.data.get("role", "")
+                    provider = event.data.get("provider", "")
+                    log_view.push_message(
+                        f"Провайдер изменён: {role} → {provider}", style="cyan"
+                    )
 
-            elif event.kind == "usage_update":
-                usage_panel.update_limits(event.data.get("limits", {}))
+                elif event.kind == "usage_update":
+                    usage_panel.update_limits(event.data.get("limits", {}))
 
-            # ALL events go to log_view
-            log_view.push_event(event)
+                # ALL events go to log_view
+                log_view.push_event(event)
+            except Exception:
+                log.error("error routing event %r", event, exc_info=True)
 
     # ── actions ──────────────────────────────────────────────────────────────
 
@@ -175,9 +189,15 @@ class DashboardApp(App):
         self.push_screen(PlanPickScreen(project_path), _on_plan_selected)
 
     def action_new_project(self) -> None:
-        # M2: launch StartupWizard with callback to replace current runner
-        log_view = self.query_one("#log-view", LogView)
-        log_view.push_message("Смена проекта — будет в M2.", style="yellow")
+        from tero2.tui.screens.project_pick import ProjectPickScreen
+
+        def _on_project(path) -> None:
+            if path is not None:
+                self._command_queue.put_nowait(
+                    Command("new_project", data={"path": str(path)}, source="tui")
+                )
+
+        self.push_screen(ProjectPickScreen(), _on_project)
 
     def action_settings(self) -> None:
         from tero2.tui.screens.settings import SettingsScreen

@@ -90,6 +90,15 @@ class PlanPickScreen(ModalScreen[Path | None]):
     def _auto_idle(self) -> None:
         self.dismiss(None)
 
+    async def _load_files(self) -> None:
+        """Async loader: if no files found, dismiss via call_from_thread for thread safety."""
+        import asyncio
+        self._files = await asyncio.to_thread(self._scan_md_files)
+        if not self._files:
+            if self.is_attached:
+                self.app.call_from_thread(self.dismiss, None)
+            return
+
     # ── event handlers ───────────────────────────────────────────────────────
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:

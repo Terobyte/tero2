@@ -92,9 +92,11 @@ class TestBudgetStateTransitions:
             context_window=1000, target_ratio=0.70, warning_ratio=0.80, hard_fail_ratio=0.50
         )
         asm = ContextAssembler(cfg)
+        # budget = 1000 * 0.70 = 700; hard_fail fires when user tokens >= 0.50/0.70 * 700 = 500
+        # Pass as task_plan (user content) — system_prompt should not count against user budget
         text_500_tokens = "x" * 2000
         with pytest.raises(ContextWindowExceededError):
-            asm.assemble("builder", text_500_tokens, "y")
+            asm.assemble("builder", "system prompt", text_500_tokens)
 
 
 class TestRoleAwareBudgeting:

@@ -46,7 +46,9 @@ class AssembledPrompt:
 
 
 def estimate_tokens(text: str) -> int:
-    return len(text) // 4
+    if not text:
+        return 0
+    return max(1, len(text) // 4)
 
 
 def _check_budget(tokens: int, budget: int, cfg: ContextConfig) -> BudgetState:
@@ -110,9 +112,9 @@ class ContextAssembler:
         cfg = self._config.context
         budget = self._role_limit(role)
 
-        user_parts: list[str] = [_section("Task", task_plan)]
+        user_parts: list[str] = [_section("Task", task_plan)] if task_plan else []
         mandatory_user = "\n\n".join(user_parts)
-        mandatory_tokens = estimate_tokens(system_prompt + mandatory_user)
+        mandatory_tokens = estimate_tokens(mandatory_user)
 
         status = _check_budget(mandatory_tokens, budget, cfg)
         if status == BudgetState.HARD_FAIL:
@@ -125,8 +127,8 @@ class ContextAssembler:
         # Higher keep_priority = retained longer (dropped last).
         optional: list[tuple[str, str, int]] = []
 
-        for i, summary in enumerate(reversed(summaries)):
-            idx = len(summaries) - i
+        for i, summary in enumerate(summaries):
+            idx = i + 1
             optional.append((f"Summary ({idx}/{len(summaries)})", summary, 0))
 
         if context_map:
@@ -144,7 +146,7 @@ class ContextAssembler:
         # O(n): accumulate token count incrementally instead of rebuilding
         # the full candidate string on each iteration.
         included_indices: set[int] = set()
-        running_tokens = estimate_tokens(system_prompt + mandatory_user)
+        running_tokens = estimate_tokens(mandatory_user)
         for idx, (_tag, body, _pri) in sorted(enumerate(optional), key=lambda x: -x[1][2]):
             section_tokens = estimate_tokens("\n\n" + _section(_tag, body))
             candidate_tokens = running_tokens + section_tokens

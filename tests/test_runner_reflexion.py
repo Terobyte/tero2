@@ -42,8 +42,9 @@ class _CapturingChain:
 
     async def run_prompt(self, prompt: str):
         self.received_prompts.append(prompt)
+        if False:  # pragma: no cover
+            yield  # mark as async generator without dead code after raise
         raise RateLimitError("fail for test")
-        yield  # unreachable — make this async generator
 
 
 class TestRunnerReflexionIntegration:

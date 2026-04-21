@@ -1,0 +1,52 @@
+[
+  {
+    "_comment": "Assistant text",
+    "type": "text",
+    "text": "Starting implementation of the requested changes."
+  },
+  {
+    "_comment": "Status with 'status' key (alternate to 'text')",
+    "type": "status",
+    "status": "tool_running"
+  },
+  {
+    "_comment": "Tool use — opencode-style with full input dict",
+    "type": "tool_use",
+    "id": "oc_tool_001",
+    "name": "bash",
+    "input": {"command": "find . -name '*.py' -not -path './.venv/*'"}
+  },
+  {
+    "_comment": "Tool result",
+    "type": "tool_result",
+    "tool_use_id": "oc_tool_001",
+    "content": "./tero2/runner.py\n./tero2/config.py\n./tero2/events.py"
+  },
+  {
+    "_comment": "Write file tool",
+    "type": "tool_use",
+    "id": "oc_tool_002",
+    "name": "write",
+    "input": {"path": "/repo/out.py", "content": "# generated\n"}
+  },
+  {
+    "_comment": "Write tool result",
+    "type": "tool_result",
+    "tool_use_id": "oc_tool_002",
+    "content": "File written: /repo/out.py"
+  },
+  {
+    "_comment": "OpenCode error event",
+    "type": "error",
+    "text": "model returned empty response"
+  },
+  {
+    "_comment": "Second text block",
+    "type": "text",
+    "text": "I've written the output file and found all Python sources."
+  },
+  {
+    "_comment": "Stream terminator",
+    "type": "turn_end"
+  }
+]

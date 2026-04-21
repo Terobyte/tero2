@@ -271,14 +271,30 @@ def _load_slice_plan_from_disk(ctx: RunnerContext, slice_id: str) -> SlicePlan:
     """Load a :class:`~tero2.players.architect.SlicePlan` from disk for crash recovery.
 
     Reads ``{milestone_path}/{slice_id}/{slice_id}-PLAN.md`` and parses it.
-    Returns an empty :class:`~tero2.players.architect.SlicePlan` when the file
-    is missing (e.g. crash before Architect wrote the file).
+
+    Raises:
+        ValueError: When the plan file is missing or empty (A2 — Architect may have
+            crashed before writing the plan; the caller must re-run Architect rather
+            than proceeding to Execute with an empty plan).
     """
     plan_path = f"{ctx.milestone_path}/{slice_id}/{slice_id}-PLAN.md"
     content = ctx.disk.read_file(plan_path)
     if not content:
+        raise ValueError(
+            f"plan file missing: {plan_path} — Architect may have crashed before "
+            f"writing the plan. Re-run Architect before proceeding to Execute."
+        )
+    return _parse_slice_plan(content, slice_id, ctx.milestone_path)
+
+
+# Alias kept for backward compatibility — callers that expect the old silent
+# empty-SlicePlan behavior should migrate to _load_slice_plan_from_disk.
+def _load_slice_plan_from_disk_safe(ctx: RunnerContext, slice_id: str) -> SlicePlan:
+    """Like _load_slice_plan_from_disk but returns empty SlicePlan instead of raising."""
+    try:
+        return _load_slice_plan_from_disk(ctx, slice_id)
+    except ValueError:
         return SlicePlan(
             slice_id=slice_id,
             slice_dir=f"{ctx.milestone_path}/{slice_id}",
         )
-    return _parse_slice_plan(content, slice_id, ctx.milestone_path)

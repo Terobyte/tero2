@@ -32,7 +32,7 @@ def _get_context_window(model: str) -> int:
     for key, limit in _CONTEXT_WINDOWS.items():
         if key in model_lower:
             return limit
-    return DEFAULT_CONTEXT_LIMIT
+    return 0  # unknown model — caller's `or context_limit` fallback is reachable
 
 
 try:
@@ -57,7 +57,7 @@ def _read_settings_key() -> str | None:
     """Read ZAI_API_KEY from ~/.claude-zai/settings.json."""
     p = Path.home() / ".claude-zai" / "settings.json"
     try:
-        data = json.loads(p.read_text())
+        data = json.loads(p.read_text(encoding="utf-8"))
         # Try top-level keys first, then nested env block
         return (
             data.get("api_key")
@@ -80,7 +80,7 @@ def _load_token(claude_home: str) -> str:
     settings_path = Path(os.path.expanduser(claude_home)) / "settings.json"
     if settings_path.exists():
         try:
-            data = json.loads(settings_path.read_text())
+            data = json.loads(settings_path.read_text(encoding="utf-8"))
             env_vals = data.get("env", {})
             return (
                 env_vals.get("ZAI_API_KEY")

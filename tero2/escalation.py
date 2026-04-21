@@ -19,7 +19,7 @@ Level 3: Human escalation
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dataclasses_replace
 from datetime import datetime, timezone
 from enum import Enum
 
@@ -130,7 +130,12 @@ async def execute_escalation(
 
     if action.level == EscalationLevel.DIVERSIFICATION:
         log.info("escalation Level 1: diversification — injecting new-approach prompt")
-        state.escalation_level = EscalationLevel.DIVERSIFICATION.value
+        state = dataclasses_replace(
+            state,
+            escalation_level=EscalationLevel.DIVERSIFICATION.value,
+            tool_repeat_count=0,
+            last_tool_hash="",
+        )
         state = checkpoint.save(state)
         await notifier.notify("stuck detected — diversifying approach", NotifyLevel.STUCK)
         return state
@@ -147,11 +152,14 @@ async def execute_escalation(
             f"Details: {sr.details if sr else ''}\n",
         )
         if action.should_backtrack:
-            state.steps_in_task = 0
-            state.retry_count = 0
-            state.tool_repeat_count = 0
-            state.last_tool_hash = ""
-        state.escalation_level = EscalationLevel.BACKTRACK_COACH.value
+            state = dataclasses_replace(
+                state,
+                steps_in_task=0,
+                retry_count=0,
+                tool_repeat_count=0,
+                last_tool_hash="",
+            )
+        state = dataclasses_replace(state, escalation_level=EscalationLevel.BACKTRACK_COACH.value)
         state = checkpoint.save(state)
         await notifier.notify("stuck — backtracking to last checkpoint", NotifyLevel.STUCK)
         return state
@@ -165,13 +173,13 @@ async def execute_escalation(
             stuck_result=_sr,
             escalation_history=escalation_history or [],
         )
-        state.escalation_level = EscalationLevel.HUMAN.value
-        state = checkpoint.mark_paused(state, "stuck — waiting for human input")
+        new_state = dataclasses_replace(state, escalation_level=EscalationLevel.HUMAN.value)
+        new_state = checkpoint.mark_paused(new_state, "stuck — waiting for human input")
         await notifier.notify(
             "🛑 Stuck — waiting for human input (edit STEER.md to resume)",
             NotifyLevel.STUCK,
         )
-        return state
+        return new_state
 
     return state
 

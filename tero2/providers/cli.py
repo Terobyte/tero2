@@ -139,6 +139,59 @@ class CLIProvider(BaseProvider):
         stdin_data = prompt.encode("utf-8")
         return cmd, stdin_data, {}
 
+    async def _stream_events(self, proc: Any) -> Any:
+        """Stream and yield parsed JSON events from a subprocess stdout.
+
+        Extracted for testability.  Non-dict JSON is silently downgraded to a
+        text event (A43 bug).  On stdout exception, stderr_task is cancelled
+        before drain (A46 bug — data may be lost).
+        """
+        stderr_task = asyncio.create_task(proc.stderr.read()) if proc.stderr else None
+
+        lines: list[str] = []
+        try:
+            async for line in proc.stdout:
+                lines.append(line.decode(errors="replace"))
+        except Exception:
+            if stderr_task is not None:
+                try:
+                    stderr_bytes_on_error = await asyncio.wait_for(asyncio.shield(stderr_task), timeout=0.5)
+                except Exception:
+                    stderr_bytes_on_error = b""
+                stderr_task.cancel()
+                from contextlib import suppress
+                with suppress(asyncio.CancelledError):
+                    await stderr_task
+            raise
+
+        stderr_bytes = b""
+        if stderr_task is not None:
+            try:
+                stderr_bytes = stderr_task.result() if stderr_task.done() else await stderr_task
+            except (asyncio.CancelledError, Exception):
+                stderr_bytes = b""
+        await proc.wait()
+
+        if proc.returncode != 0:
+            err_msg = stderr_bytes.decode(errors="replace").strip()
+            log.error("%s exited %d: %s", self._name, proc.returncode, err_msg)
+            raise ProviderError(f"{self._name} exited {proc.returncode}: {err_msg}")
+
+        for raw_line in lines:
+            stripped = raw_line.strip()
+            if not stripped:
+                continue
+            try:
+                parsed = json.loads(stripped)
+                if isinstance(parsed, dict):
+                    yield parsed
+                else:
+                    raise ProviderError(f"{self._name}: non-dict JSON response: {stripped!r}")
+            except json.JSONDecodeError:
+                yield {"type": "text", "text": stripped}
+
+        yield {"type": "turn_end", "text": ""}
+
     async def run(self, **kwargs: Any) -> Any:
         prompt = kwargs.get("prompt", "")
         builder = {
@@ -187,44 +240,9 @@ class CLIProvider(BaseProvider):
                 await proc.stdin.wait_closed()
 
         assert proc.stdout is not None
-        stderr_task = asyncio.create_task(proc.stderr.read()) if proc.stderr else None
+        async for event in self._stream_events(proc):
+            yield event
 
-        lines: list[str] = []
-        try:
-            async for line in proc.stdout:
-                lines.append(line.decode(errors="replace"))
-        except Exception:
-            if stderr_task is not None:
-                stderr_task.cancel()
-                from contextlib import suppress
-                with suppress(asyncio.CancelledError):
-                    await stderr_task
-            raise
 
-        stderr_bytes = b""
-        if stderr_task is not None:
-            try:
-                stderr_bytes = stderr_task.result() if stderr_task.done() else await stderr_task
-            except (asyncio.CancelledError, Exception):
-                stderr_bytes = b""
-        await proc.wait()
-
-        if proc.returncode != 0:
-            err_msg = stderr_bytes.decode(errors="replace").strip()
-            log.error("%s exited %d: %s", self._name, proc.returncode, err_msg)
-            raise ProviderError(f"{self._name} exited {proc.returncode}: {err_msg}")
-
-        for raw_line in lines:
-            stripped = raw_line.strip()
-            if not stripped:
-                continue
-            try:
-                parsed = json.loads(stripped)
-                if isinstance(parsed, dict):
-                    yield parsed
-                else:
-                    yield {"type": "text", "text": stripped}
-            except json.JSONDecodeError:
-                yield {"type": "text", "text": stripped}
-
-        yield {"type": "turn_end", "text": ""}
+# Alias for backward compatibility and test imports.
+CliProvider = CLIProvider
