@@ -123,8 +123,14 @@ class EventDispatcher:
     def unsubscribe(self, q: asyncio.Queue[Event]) -> None:
         """Remove a previously subscribed queue.
 
-        Silently does nothing if the queue is not currently subscribed.
+        Drains any pending events so the queue releases references to event
+        data immediately. Silently does nothing if the queue is not subscribed.
         """
+        while True:
+            try:
+                q.get_nowait()
+            except asyncio.QueueEmpty:
+                break
         try:
             self._subscribers.remove(q)
         except ValueError:

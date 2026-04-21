@@ -426,7 +426,10 @@ class TestBug32ValidatePlanTaskIdInErrors:
         """Sanity: well-formed plan must still produce no errors."""
         from tero2.players.architect import validate_plan
 
-        plan = "## T01: task one\nMust-haves:\n- item a\n## T02: task two\nMust-haves:\n- item b\n"
+        plan = (
+            "## T01: task one\nDo task one.\nMust-haves:\n- item a\n"
+            "## T02: task two\nDo task two.\nMust-haves:\n- item b\n"
+        )
         assert validate_plan(plan) == []
 
 

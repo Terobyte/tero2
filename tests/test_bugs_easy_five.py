@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -172,6 +172,7 @@ class TestBug69StdinWriteNoBrokenPipeGuard:
 
             proc.stderr.read = read_stderr
             proc.returncode = 0
+            proc.wait = AsyncMock(return_value=0)
             return proc
 
         with patch("asyncio.create_subprocess_exec", side_effect=fake_create):

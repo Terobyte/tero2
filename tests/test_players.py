@@ -144,7 +144,7 @@ class TestArchitectPlayer:
     def test_run_writes_plan_to_correct_path(self, tmp_path: Path) -> None:
         from tero2.players.architect import ArchitectPlayer
 
-        plan = "## T01: Setup\nMust-haves: init module"
+        plan = "## T01: Setup\nInitialise the module.\nMust-haves: init module"
         chain = _make_chain(plan)
         disk = _make_disk(tmp_path)
         arch = ArchitectPlayer(chain, disk)
@@ -171,7 +171,7 @@ class TestArchitectValidation:
     def test_valid_plan(self):
         from tero2.players.architect import validate_plan
 
-        plan = "## T01: Setup\nMust-haves: init module\n## T02: Test\nMust-haves: tests pass\n"
+        plan = "## T01: Setup\nInitialise the module.\nMust-haves: init module\n## T02: Test\nRun the test suite.\nMust-haves: tests pass\n"
         assert validate_plan(plan) == []
 
     def test_no_tasks(self):
@@ -216,8 +216,8 @@ class TestArchitectValidation:
         from tero2.players.architect import validate_plan
 
         plan = (
-            "## T01: Base\nMust-haves: core module\n"
-            "## T02: Build\nMust-haves: feature\nDepends on: T01\n"
+            "## T01: Base\nProvide the core module.\nMust-haves: core module\n"
+            "## T02: Build\nBuild the feature on top.\nMust-haves: feature\nDepends on: T01\n"
         )
         assert validate_plan(plan) == []
 

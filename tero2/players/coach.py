@@ -125,8 +125,7 @@ class CoachPlayer(BasePlayer):
                 if content:
                     entry = f"### {sid}/{tid}\n{content}"
                     if total_size + len(entry) > _SIZE_CAP:
-                        # Cap reached for this slice; stop reading tasks in this
-                        # slice but continue to the next slice.
+                        summaries.append("[TRUNCATED — context limit reached]")
                         break
                     summaries.append(entry)
                     total_size += len(entry)
@@ -191,5 +190,13 @@ def _parse_sections(output: str) -> dict[str, str]:
         section_name = match.group(1)
         start = match.end()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(output)
-        result[section_name] = output[start:end].strip()
+        chunk = output[start:end].strip()
+        if section_name in result:
+            result[section_name] = result[section_name] + "\n" + chunk
+        else:
+            result[section_name] = chunk
     return result
+
+
+# Backward-compatible alias used by tests and external callers.
+Coach = CoachPlayer

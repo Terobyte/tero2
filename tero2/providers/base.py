@@ -11,6 +11,14 @@ class BaseProvider(ABC):
     async def run(self, **kwargs: Any) -> Any: ...
 
     @property
+    def kind(self) -> str:
+        """Canonical short name for normalizer dispatch (e.g. ``"claude"``).
+
+        Distinct from :attr:`display_name` which may contain model tags.
+        """
+        return getattr(self, "_kind", "")
+
+    @property
     def display_name(self) -> str:
         return self.__class__.__name__
 

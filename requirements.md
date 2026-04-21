@@ -948,7 +948,7 @@ Expected: all green.
 
 Invariant: `CLIProvider.run` yields parsed messages while the subprocess is still running, not after `proc.wait()`. Sleep-based assertions are flaky — use an `asyncio.Event` gate controlling when the fake `proc.wait()` returns.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_cli_provider_streaming.py
@@ -1028,7 +1028,7 @@ async def test_cli_provider_yields_before_proc_exit():
 
 Note: `CLIProvider.__init__` signature varies — check `grep -n 'def __init__' tero2/providers/cli.py` and adjust accordingly. Key is a minimal instance that runs `.run()`.
 
-- [ ] **Step 2: Do NOT commit yet** — Task 12 ships test + refactor in one commit.
+- [x] **Step 2: Do NOT commit yet** — Task 12 ships test + refactor in one commit.
 
 ---
 
@@ -1076,9 +1076,9 @@ if proc.returncode != 0:
 yield {"type": "turn_end", "text": ""}
 ```
 
-- [ ] **Step 1: Apply the refactor**
-- [ ] **Step 2:** `uv run pytest tests/test_cli_provider_streaming.py -v --timeout=3` → pass
-- [ ] **Run tests + commit**
+- [x] **Step 1: Apply the refactor**
+- [x] **Step 2:** `uv run pytest tests/test_cli_provider_streaming.py -v --timeout=3` → pass
+- [x] **Run tests + commit**
 
 ```bash
 git add tero2/providers/cli.py tests/test_cli_provider_streaming.py
@@ -1093,7 +1093,7 @@ git commit -m "stream CLIProvider output line-by-line instead of buffering"
 
 **Files:** `tero2/providers/base.py`, `tero2/providers/cli.py`, `tero2/providers/zai.py`, `tero2/providers/shell.py`, `tests/test_provider_kind.py`
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```python
 # tests/test_provider_kind.py
@@ -1119,7 +1119,7 @@ def test_base_provider_default_kind_is_empty():
     assert _Dummy().kind == ""
 ```
 
-- [ ] **Step 2:** Add to `BaseProvider`:
+- [x] **Step 2:** Add to `BaseProvider`:
 
 ```python
     @property

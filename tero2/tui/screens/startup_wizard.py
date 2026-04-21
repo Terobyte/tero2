@@ -31,6 +31,9 @@ class StartupWizard(Screen[tuple[Path, Path | None] | None]):
         )
 
     def _on_plan_picked(self, project_path: Path, plan_file: Path | None) -> None:
+        if plan_file is None:
+            self.dismiss(None)
+            return
         sora_config = project_path / ".sora" / "config.toml"
         if sora_config.exists():
             # project already configured — skip providers step

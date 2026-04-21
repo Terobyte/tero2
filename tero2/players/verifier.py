@@ -109,6 +109,11 @@ class VerifierPlayer(BasePlayer):
         task_id: str = kwargs.get("task_id", "T01")
         verify_commands: list[str] = kwargs.get("verify_commands", [])
 
+        if not isinstance(verify_commands, list):
+            raise TypeError(
+                f"verify_commands must be list, got {type(verify_commands).__name__}"
+            )
+
         cwd = self.working_dir or "."
         try:
             if not verify_commands:

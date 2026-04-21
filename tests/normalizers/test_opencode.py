@@ -1,21 +1,28 @@
 """Normalizer tests for the OpenCode CLI provider (opencode run --format json).
 
-Tests ``OpenCodeNormalizer`` against the real raw shapes emitted by
-``opencode run --format json``.  OpenCode uses an ``"event"`` discriminator
-key (not ``"type"``), and different field names for tool data:
-  - ``"event":"message"`` with ``"role"`` and ``"text"`` for assistant narration
-  - ``"event":"tool_call"`` with ``"args"`` (not ``"input"``) for tool invocations
-  - ``"event":"tool_result"`` with ``"result"`` (not ``"content"``) for tool output
-  - ``"event":"end"`` for stream termination (not ``"done"`` or ``"result"``)
-  - ``"event":"error"`` with ``"message"`` for errors
+Covers both wire formats emitted by opencode:
+
+  **Real OpenCode 1.4.0 format** (``"type"`` discriminator + ``"part"`` envelope):
+    - Captured from live ``opencode run --format json`` runs (see fixtures/captures/).
+    - Uses ``type="step_start"|"tool_use"|"text"|"step_finish"`` and
+      ``{"type":"error",...}`` for unknown-model failures.
+
+  **Legacy / synthetic format** (``"event"`` discriminator):
+    - Kept for backward compatibility; synthetic fixtures still exercise this path.
+    - ``"event":"message"`` with ``"role"`` and ``"text"`` for assistant narration
+    - ``"event":"tool_call"`` with ``"args"`` (not ``"input"``) for tool invocations
+    - ``"event":"tool_result"`` with ``"result"`` (not ``"content"``) for tool output
+    - ``"event":"end"`` for stream termination (not ``"done"`` or ``"result"``)
+    - ``"event":"error"`` with ``"message"`` for errors
 
 Contracts validated here:
   - Provider-specific event keys map to canonical StreamEvent kinds.
   - ``role="user"`` messages are silently skipped (no event emitted).
-  - Tool correlation via ``"id"`` key (same as Codex, different from Claude).
-  - ``"args"`` dict is stored in tool_args unchanged.
+  - Tool correlation via ``"id"``/``"callID"`` key.
+  - ``"args"``/``"state.input"`` dict is stored in tool_args unchanged.
   - Unknown event values → empty iterable, no exception.
-  - Golden fixture covers message, tool_call, tool_result, error, end.
+  - Synthetic golden fixture covers message, tool_call, tool_result, error, end.
+  - Real capture fixtures validate the production ``"type"``/``"part"`` wire format.
 """
 
 from __future__ import annotations
@@ -26,6 +33,7 @@ from pathlib import Path
 from tero2.providers.normalizers.opencode import OpenCodeNormalizer
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
+CAPTURES_DIR = FIXTURE_DIR / "captures"
 
 
 def _load(name: str) -> list[dict]:
@@ -222,8 +230,13 @@ def test_opencode_unknown_event_yields_nothing() -> None:
     assert out == []
 
 
-def test_opencode_type_key_instead_of_event_yields_nothing() -> None:
-    """A dict with 'type' key (Claude/Codex style) must yield nothing in OpenCode."""
+def test_opencode_type_key_without_part_yields_nothing() -> None:
+    """A 'type=text' dict without the 'part' envelope must yield nothing.
+
+    Real OpenCode 1.4.0 text events carry content inside a 'part' object.
+    A bare {'type':'text','text':'...'} (no 'part' key) does not match
+    the real format and must be silently skipped.
+    """
     n = OpenCodeNormalizer()
     out = list(n.normalize({"type": "text", "text": "wrong format"}, role="builder"))
     assert out == []
@@ -276,4 +289,55 @@ def test_opencode_unknown_model_fixture_yields_error() -> None:
         events.extend(n.normalize(raw, role="builder"))
     assert any(e.kind == "error" for e in events), (
         "expected at least one error event from unknown-model fixture"
+    )
+
+
+# ── real OpenCode 1.4.0 capture fixtures (type/part wire format) ──────────────
+
+
+def _load_capture(name: str) -> list[dict]:
+    """Load a .jsonl from fixtures/captures/, skipping blank lines and // comments."""
+    out = []
+    for line in (CAPTURES_DIR / name).read_text(encoding="utf-8").splitlines():
+        s = line.strip()
+        if not s or s.startswith("#") or s.startswith("//"):
+            continue
+        out.append(json.loads(s))
+    return out
+
+
+def test_opencode_real_capture_produces_text_tool_use_turn_end() -> None:
+    """Real opencode 1.4.0 capture must produce text, tool_use, and turn_end events.
+
+    The capture (fixtures/captures/opencode.jsonl) uses the real wire format:
+    type=step_start/tool_use/text/step_finish.  Verifies that the normalizer
+    handles these type/part envelopes rather than silently dropping them.
+    """
+    n = OpenCodeNormalizer()
+    events = []
+    for raw in _load_capture("opencode.jsonl"):
+        events.extend(n.normalize(raw, role="builder"))
+    kinds = {e.kind for e in events}
+    assert "text" in kinds, f"expected text event, got kinds={kinds}"
+    assert "tool_use" in kinds, f"expected tool_use event, got kinds={kinds}"
+    assert "turn_end" in kinds, f"expected turn_end event (from step_finish reason=stop), got kinds={kinds}"
+
+
+def test_opencode_real_unknown_model_capture_yields_error() -> None:
+    """Real captures/opencode_unknown_model.jsonl must produce kind='error'.
+
+    The real capture uses {'type':'error','error':{'data':{'message':'...'}}}
+    (not the synthetic {'event':'error','message':'...'} shape).
+    Validates the production unknown-model failure path.
+    """
+    n = OpenCodeNormalizer()
+    events = []
+    for raw in _load_capture("opencode_unknown_model.jsonl"):
+        events.extend(n.normalize(raw, role="builder"))
+    assert any(e.kind == "error" for e in events), (
+        "expected at least one error event from real unknown-model capture"
+    )
+    error_events = [e for e in events if e.kind == "error"]
+    assert "not found" in error_events[0].content.lower() or "mimo" in error_events[0].content.lower(), (
+        f"error content should mention the missing model, got: {error_events[0].content!r}"
     )

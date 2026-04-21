@@ -14,6 +14,8 @@ log = logging.getLogger(__name__)
 
 
 class ShellProvider(BaseProvider):
+    _kind = "shell"
+
     @property
     def display_name(self) -> str:
         return "shell"
@@ -37,6 +39,9 @@ class ShellProvider(BaseProvider):
         except Exception:
             proc.terminate()
             await proc.wait()
+            # proc.stdout / proc.stderr are asyncio.StreamReader objects which
+            # have no .close() method — the event loop closes their underlying
+            # _PipeReadTransport automatically once the process has exited.
             raise
         if proc.returncode != 0:
             err_msg = stderr.decode(errors="replace").strip()

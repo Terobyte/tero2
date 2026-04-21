@@ -76,6 +76,9 @@ class ProjectPickScreen(ModalScreen[Path | None]):
         except NoMatches:
             self.mount(Input(placeholder="Путь к проекту…", id="path-input"))
 
+    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        self._pending_delete = None
+
     def action_delete_entry(self) -> None:
         try:
             lv = self.query_one("#project-list", ListView)

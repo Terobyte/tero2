@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -10,6 +10,8 @@ from textual.screen import ModalScreen
 from textual.widgets import Footer, Input, Label, ListItem, ListView, Static
 
 from tero2.providers.catalog import ModelEntry
+
+_DEBOUNCE_DELAY = 0.15  # seconds; avoids O(n) rebuild on every keystroke
 
 
 class ModelPickScreen(ModalScreen[ModelEntry | None]):
@@ -31,6 +33,7 @@ class ModelPickScreen(ModalScreen[ModelEntry | None]):
         self._role_name = role_name
         self._all_entries = entries
         self._filtered = list(entries)
+        self._debounce_timer: Any = None
 
     def compose(self) -> ComposeResult:
         yield Static(
@@ -52,6 +55,14 @@ class ModelPickScreen(ModalScreen[ModelEntry | None]):
 
     def on_input_changed(self, event: Input.Changed) -> None:
         q = event.value.lower()
+        if self._debounce_timer is not None:
+            self._debounce_timer.stop()
+        self._debounce_timer = self.set_timer(
+            _DEBOUNCE_DELAY,
+            lambda: self._apply_filter(q),
+        )
+
+    def _apply_filter(self, q: str) -> None:
         self._filtered = (
             [e for e in self._all_entries if q in e.id.lower() or q in e.label.lower()]
             if q

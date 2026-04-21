@@ -47,6 +47,7 @@ class SlicePlan:
     slice_id: str  # e.g. "S01"
     slice_dir: str  # e.g. "milestones/M001/S01"
     tasks: list[Task] = field(default_factory=list)
+    dropped_headers: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -253,10 +254,12 @@ def _parse_slice_plan(
     """
     slice_dir = f"{milestone_path}/{slice_id}"
     tasks: list[Task] = []
+    dropped_headers: list[str] = []
 
-    # Split on task-header boundaries; first element is any preamble.
-    # Matches `## T01:`, `## T02:`, and `## T01 ` (space instead of colon).
-    split_re = re.compile(r"^(## T\d+[:\s][^\n]*)\n", re.MULTILINE)
+    # Split on ALL level-2 headers so malformed ones (missing T-code) are
+    # captured and can be tracked in dropped_headers rather than silently
+    # swallowed into the previous task's body.
+    split_re = re.compile(r"^(## [^\n]+)\n", re.MULTILINE)
     parts = split_re.split(content)
     # parts layout: [preamble, header1, body1, header2, body2, ...]
     # pairs start at index 1
@@ -267,6 +270,7 @@ def _parse_slice_plan(
         tid_match = _TASK_ID_RE.search(header)
         if not tid_match:
             log.warning("_parse_slice_plan: dropping header with no task ID: %r", header)
+            dropped_headers.append(header)
             continue
         task_id = tid_match.group(0)
 
@@ -284,7 +288,7 @@ def _parse_slice_plan(
         tasks.append(task)
         tasks[-1].index = len(tasks) - 1
 
-    return SlicePlan(slice_id=slice_id, slice_dir=slice_dir, tasks=tasks)
+    return SlicePlan(slice_id=slice_id, slice_dir=slice_dir, tasks=tasks, dropped_headers=dropped_headers)
 
 
 # ── Plan validator ───────────────────────────────────────────────────────
@@ -316,10 +320,14 @@ def validate_plan(plan: str) -> list[str]:
     for idx in range(1, len(parts) - 1, 2):
         header = parts[idx]
         body = parts[idx + 1] if idx + 1 < len(parts) else ""
+        tid = _TASK_ID_RE.search(header)
+        tid_str = tid.group(0) if tid else f"#{(idx + 1) // 2}"
         if not _MUST_HAVE_RE.search(body):
-            tid = _TASK_ID_RE.search(header)
-            tid_str = tid.group(0) if tid else f"#{(idx + 1) // 2}"
             errors.append(f"task {tid_str} is missing must-haves")
+        must_have_split = re.split(r"\*?\*?[Mm]ust.{0,3}[Hh]aves?\*?\*?:?", body, maxsplit=1, flags=re.IGNORECASE)
+        description = must_have_split[0].strip()
+        if not description:
+            errors.append(f"task {tid_str} has empty description")
     return errors
 
 

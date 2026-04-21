@@ -338,7 +338,14 @@ class Runner:
                     300,
                 )
                 jitter = random.uniform(0, retry_cfg.chain_retry_wait_s * 0.1)
-                await asyncio.sleep(wait + jitter)
+                _remaining = wait + jitter
+                _tick = 5.0
+                while _remaining > 0:
+                    if shutdown_event and shutdown_event.is_set():
+                        log.info("shutdown requested — exiting during retry wait")
+                        return
+                    await asyncio.sleep(min(_tick, _remaining))
+                    _remaining -= _tick
 
             override = await self._check_override()
             if override:

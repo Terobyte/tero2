@@ -188,7 +188,11 @@ class AgentState:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
         tmp.write_text(self.to_json(), encoding="utf-8")
-        os.replace(tmp, path)
+        try:
+            os.replace(tmp, path)
+        except:
+            tmp.unlink(missing_ok=True)
+            raise
         # Remember the last save path so touch() can persist without a path arg.
         # Uses object.__setattr__ to bypass the phase-guard __setattr__ and to
         # keep _last_path out of dataclasses.fields() → it won't appear in to_json().

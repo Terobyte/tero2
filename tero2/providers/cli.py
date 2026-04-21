@@ -32,6 +32,7 @@ class CLIProvider(BaseProvider):
         working_dir: str = "",
     ) -> None:
         self._name = name
+        self._kind = name
         self._config = config
         self._default_model = ""
         self._working_dir = working_dir

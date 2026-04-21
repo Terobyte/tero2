@@ -209,6 +209,7 @@ class TestArchitectPlayerIntegration:
         # Plan must have correct task headers (## T01:) and must-haves
         response = (
             "## T01: Implement the feature\n\n"
+            "Implement the core feature logic.\n\n"
             "Must-haves:\n"
             "- Feature works correctly\n"
             "- Tests pass\n"

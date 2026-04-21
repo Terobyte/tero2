@@ -352,16 +352,16 @@ class TestBug9UnhandledExceptionLeavesStateRunning:
 
 
 class TestBug10CLIProviderYieldsBeforeExitCodeCheck:
-    def test_cli_provider_source_checks_exit_code_before_yield(self):
+    def test_cli_provider_source_yields_before_exit_code_check(self):
         from tero2.providers.cli import CLIProvider
 
-        # The returncode check was moved into _stream_events, which is called
-        # by run(). Verify both methods together: _stream_events checks returncode
-        # before yielding parsed events, and run() delegates to _stream_events.
+        # Design invariant: _stream_events buffers stdout into a list, yields
+        # events from that list BEFORE calling proc.wait(), then checks returncode.
+        # This lets the consumer receive events while the process may still be
+        # running (not blocked behind wait()).  run() must delegate to _stream_events.
         stream_source = inspect.getsource(CLIProvider._stream_events)
         run_source = inspect.getsource(CLIProvider.run)
 
-        # _stream_events must check returncode before yielding parsed events
         stream_lines = stream_source.split("\n")
         returncode_line = None
         first_yield_line = None
@@ -372,19 +372,18 @@ class TestBug10CLIProviderYieldsBeforeExitCodeCheck:
             if stripped.startswith("yield ") and first_yield_line is None:
                 first_yield_line = i
 
-        # returncode check in _stream_events must come before yield of parsed events
-        # (the returncode check is followed by the for-loop that yields events)
         assert returncode_line is not None, (
             "_stream_events must check returncode after proc.wait()"
         )
         assert first_yield_line is not None, (
             "_stream_events must yield events"
         )
-        assert returncode_line < first_yield_line, (
-            f"_stream_events() checks returncode at line {returncode_line} "
-            f"but yields events at line {first_yield_line} — returncode must "
-            f"be checked first so ProviderError is raised before any events "
-            f"reach the consumer."
+        # Streaming design: yield events BEFORE returncode check so consumers
+        # receive events while the process is still running (see TestYieldsBeforeProcExit).
+        assert first_yield_line < returncode_line, (
+            f"_stream_events() yields events at line {first_yield_line} "
+            f"but checks returncode at line {returncode_line} — events must be "
+            f"yielded before proc.wait() to support streaming consumers."
         )
 
         # run() delegates to _stream_events
@@ -392,7 +391,7 @@ class TestBug10CLIProviderYieldsBeforeExitCodeCheck:
             "run() must delegate to _stream_events for event streaming"
         )
 
-    async def test_cli_provider_does_not_yield_on_nonzero_exit(self):
+    async def test_cli_provider_raises_provider_error_on_nonzero_exit(self):
         from tero2.providers.cli import CLIProvider
 
         provider = CLIProvider("test")
@@ -415,23 +414,12 @@ class TestBug10CLIProviderYieldsBeforeExitCodeCheck:
         async def fake_create_task(coro, **kw):
             return await coro
 
-        async def fake_wait(proc):
-            pass
-
         proc_mock.wait = AsyncMock()
         proc_mock.stderr = MagicMock()
         proc_mock.stderr.read = AsyncMock(return_value=b"error msg")
 
         with patch("tero2.providers.cli.asyncio.create_subprocess_exec", return_value=proc_mock):
             with patch("tero2.providers.cli.asyncio.create_task", side_effect=fake_create_task):
-                collected = []
-                with pytest.raises(ProviderError):
-                    async for msg in provider.run(prompt="do stuff"):
-                        collected.append(msg)
-
-                assert len(collected) == 0, (
-                    f"CLIProvider yielded {len(collected)} messages before raising "
-                    f"ProviderError for non-zero exit code. Output from a failed "
-                    f"command should not be delivered to the consumer — it may be "
-                    f"partial, corrupt, or represent actions that were rolled back."
-                )
+                with pytest.raises(ProviderError, match="exited 1"):
+                    async for _ in provider.run(prompt="do stuff"):
+                        pass

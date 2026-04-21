@@ -6,6 +6,7 @@ Priority: project .sora/config.toml > global ~/.tero2/config.toml > defaults.
 from __future__ import annotations
 
 import logging
+import threading
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,6 +25,9 @@ from tero2.constants import (
 from tero2.errors import ConfigError
 
 log = logging.getLogger(__name__)
+
+# Guards load_config() so concurrent threads don't interleave TOML parsing.
+_load_lock = threading.Lock()
 
 
 @dataclass
@@ -116,15 +120,16 @@ class Config:
 
 
 def load_config(project_path: Path, override_path: Path | None = None) -> Config:
-    global_path = Path.home() / ".tero2" / "config.toml"
-    project_path_config = project_path / ".sora" / "config.toml"
-    global_raw = _load_toml(global_path)
-    project_raw = _load_toml(project_path_config)
-    merged = _merge_dicts(global_raw, project_raw)
-    if override_path is not None:
-        override_raw = _load_toml(override_path)
-        merged = _merge_dicts(merged, override_raw)
-    return _parse_config(merged)
+    with _load_lock:
+        global_path = Path.home() / ".tero2" / "config.toml"
+        project_path_config = project_path / ".sora" / "config.toml"
+        global_raw = _load_toml(global_path)
+        project_raw = _load_toml(project_path_config)
+        merged = _merge_dicts(global_raw, project_raw)
+        if override_path is not None:
+            override_raw = _load_toml(override_path)
+            merged = _merge_dicts(merged, override_raw)
+        return _parse_config(merged)
 
 
 def _load_toml(path: Path) -> dict:

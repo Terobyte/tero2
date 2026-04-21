@@ -145,7 +145,8 @@ async def test_a31_recovery_not_triggered_for_non_empty_tasks_errors(tmp_path):
 
     # A valid plan that WOULD be found on disk if recovery is triggered
     disk_valid_plan = (
-        "## T01: Completely different task\n\n"
+        "## T01: Completely different task\n"
+        "Execute a completely different task.\n"
         "Must-haves: nothing relevant to current slice.\n"
     )
     assert validate_plan(disk_valid_plan) == [], (

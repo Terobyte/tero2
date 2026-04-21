@@ -144,13 +144,6 @@ async def execute_escalation(
         log.info("escalation Level 2: backtrack + resume (Coach deferred in MVP2)")
         timestamp = datetime.now(timezone.utc).isoformat()
         sr = stuck_result
-        disk.append_file(
-            "persistent/EVENT_JOURNAL.md",
-            f"\n## Stuck Event — {timestamp}\n"
-            f"Level 2 escalation triggered. Resetting to last checkpoint.\n"
-            f"Signal: {sr.signal.value if sr else 'unknown'}\n"
-            f"Details: {sr.details if sr else ''}\n",
-        )
         if action.should_backtrack:
             state = dataclasses_replace(
                 state,
@@ -161,20 +154,27 @@ async def execute_escalation(
             )
         state = dataclasses_replace(state, escalation_level=EscalationLevel.BACKTRACK_COACH.value)
         state = checkpoint.save(state)
+        disk.append_file(
+            "persistent/EVENT_JOURNAL.md",
+            f"\n## Stuck Event — {timestamp}\n"
+            f"Level 2 escalation triggered. Resetting to last checkpoint.\n"
+            f"Signal: {sr.signal.value if sr else 'unknown'}\n"
+            f"Details: {sr.details if sr else ''}\n",
+        )
         await notifier.notify("stuck — backtracking to last checkpoint", NotifyLevel.STUCK)
         return state
 
     if action.level == EscalationLevel.HUMAN:
         log.info("escalation Level 3: human escalation — pausing runner")
         _sr = stuck_result or StuckResult(signal=StuckSignal.NONE, details="unknown", severity=0)
+        new_state = dataclasses_replace(state, escalation_level=EscalationLevel.HUMAN.value)
+        new_state = checkpoint.mark_paused(new_state, "stuck — waiting for human input")
         write_stuck_report(
             disk=disk,
-            state=state,
+            state=new_state,
             stuck_result=_sr,
             escalation_history=escalation_history or [],
         )
-        new_state = dataclasses_replace(state, escalation_level=EscalationLevel.HUMAN.value)
-        new_state = checkpoint.mark_paused(new_state, "stuck — waiting for human input")
         await notifier.notify(
             "🛑 Stuck — waiting for human input (edit STEER.md to resume)",
             NotifyLevel.STUCK,

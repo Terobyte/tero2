@@ -26,9 +26,14 @@ class FileLock:
                 pid = self._read_pid()
                 raise LockHeldError(pid, str(self.lock_path)) from exc
             raise
-        os.ftruncate(fd, 0)
-        os.lseek(fd, 0, os.SEEK_SET)
-        os.write(fd, f"{os.getpid()}\n".encode())
+        pid_bytes = f"{os.getpid()}\n".encode()
+        try:
+            os.lseek(fd, 0, os.SEEK_SET)
+            os.write(fd, pid_bytes)
+            os.truncate(self.lock_path, len(pid_bytes))
+        except:
+            os.close(fd)
+            raise
         self._fd = fd
 
     def release(self) -> None:

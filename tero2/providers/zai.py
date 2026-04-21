@@ -116,6 +116,7 @@ class ZaiProvider(BaseProvider):
 
     def __init__(self, config: ZaiConfig | None = None):
         self.config = config or ZaiConfig()
+        self._kind = "zai"
 
     async def run(  # type: ignore[override]
         self,

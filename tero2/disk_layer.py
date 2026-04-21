@@ -51,10 +51,14 @@ class DiskLayer:
         except OSError:
             return ""
 
-    def write_file(self, relative_path: str, content: str) -> None:
+    def write_file(self, relative_path: str, content: str) -> bool:
         path = self.sora_dir / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        try:
+            path.write_text(content, encoding="utf-8")
+            return True
+        except OSError:
+            return False
 
     def append_file(self, relative_path: str, content: str) -> None:
         path = self.sora_dir / relative_path
