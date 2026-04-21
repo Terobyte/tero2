@@ -142,24 +142,44 @@ class CLIProvider(BaseProvider):
     async def _stream_events(self, proc: Any) -> Any:
         """Stream and yield parsed JSON events from a subprocess stdout.
 
-        Extracted for testability.  Non-dict JSON is silently downgraded to a
-        text event (A43 bug).  On stdout exception, stderr_task is cancelled
-        before drain (A46 bug — data may be lost).
+        Extracted for testability.  Non-dict JSON raises ProviderError (A43 bug).
+        On stdout exception, stderr_task is cancelled before drain (A46 bug —
+        data may be lost).
+
+        Events are yielded inside the stdout read loop (no intermediate
+        buffering), so callers receive each parsed message as soon as it
+        arrives rather than after ``proc.wait()`` returns.  If stdout raises,
+        the stderr task is cancelled immediately and the exception propagates.
         """
+        from contextlib import suppress
+
         stderr_task = asyncio.create_task(proc.stderr.read()) if proc.stderr else None
 
-        lines: list[str] = []
         try:
             async for line in proc.stdout:
-                lines.append(line.decode(errors="replace"))
+                stripped = line.decode(errors="replace").strip()
+                if not stripped:
+                    continue
+                try:
+                    parsed = json.loads(stripped)
+                except json.JSONDecodeError:
+                    yield {"type": "text", "text": stripped}
+                    continue
+                if isinstance(parsed, dict):
+                    yield parsed
+                else:
+                    raise ProviderError(
+                        f"{self._name}: non-dict JSON response: {stripped!r}"
+                    )
         except Exception:
             if stderr_task is not None:
+                # Drain stderr (A46): await first so buffered error data isn't
+                # lost; then cancel on timeout / completion.
                 try:
-                    stderr_bytes_on_error = await asyncio.wait_for(asyncio.shield(stderr_task), timeout=0.5)
+                    await asyncio.wait_for(asyncio.shield(stderr_task), timeout=0.5)
                 except Exception:
-                    stderr_bytes_on_error = b""
+                    pass
                 stderr_task.cancel()
-                from contextlib import suppress
                 with suppress(asyncio.CancelledError):
                     await stderr_task
             raise
@@ -176,19 +196,6 @@ class CLIProvider(BaseProvider):
             err_msg = stderr_bytes.decode(errors="replace").strip()
             log.error("%s exited %d: %s", self._name, proc.returncode, err_msg)
             raise ProviderError(f"{self._name} exited {proc.returncode}: {err_msg}")
-
-        for raw_line in lines:
-            stripped = raw_line.strip()
-            if not stripped:
-                continue
-            try:
-                parsed = json.loads(stripped)
-                if isinstance(parsed, dict):
-                    yield parsed
-                else:
-                    raise ProviderError(f"{self._name}: non-dict JSON response: {stripped!r}")
-            except json.JSONDecodeError:
-                yield {"type": "text", "text": stripped}
 
         yield {"type": "turn_end", "text": ""}
 
@@ -231,6 +238,11 @@ class CLIProvider(BaseProvider):
                 proc.stdin.write(stdin_data)
                 await proc.stdin.drain()
             except BrokenPipeError as exc:
+                try:
+                    proc.kill()
+                except (ProcessLookupError, OSError):
+                    pass
+                await proc.wait()
                 raise ProviderError(
                     f"Broken pipe writing to {self._name}: "
                     f"process exited before stdin was sent"

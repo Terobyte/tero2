@@ -10,6 +10,7 @@ Coverage:
 - stdout exception cancels stderr task before drain (A46 bug behaviour)
 - Multiple valid events yielded in order
 - Mixed valid/invalid JSON lines handled correctly
+- run() yields each parsed line while subprocess is still running (not after wait)
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -74,6 +76,10 @@ class _RaisingStdout:
         return self
 
     async def __anext__(self) -> bytes:
+        # Yield control so companion tasks (e.g. stderr read) can schedule
+        # before the next line arrives — mirrors real subprocess I/O which
+        # always awaits the underlying transport.
+        await asyncio.sleep(0)
         if self._lines:
             return self._lines.pop(0)
         if not self._raised:
@@ -365,7 +371,10 @@ class TestStdoutExceptionCancelsStderr:
         with pytest.raises(RuntimeError):
             async for ev in p._stream_events(proc):
                 events.append(ev)
-        assert events == []
+        # Streaming impl: lines read before the stdout error are delivered;
+        # nothing is yielded AFTER the error propagates.  _RaisingProc emits
+        # exactly one dict line, then raises.
+        assert events == [{"type": "text"}]
 
     async def test_stderr_task_cancelled_on_stdout_error(self) -> None:
         proc = _RaisingProc()
@@ -373,3 +382,56 @@ class TestStdoutExceptionCancelsStderr:
         with pytest.raises(RuntimeError):
             await _collect(p._stream_events(proc))
         assert proc.stderr.was_cancelled
+
+
+class _GateProc:
+    """Fake process whose wait() blocks until exit_gate is set.
+
+    Used to assert that CLIProvider.run() yields events *before* the
+    subprocess exits, not after.  A triple-buffering implementation would
+    deadlock the test because proc.wait() returns only when the gate opens.
+    """
+
+    def __init__(self, stdout_lines: list[bytes], exit_gate: asyncio.Event) -> None:
+        self.stdout = _FakeStdout(stdout_lines)
+        self.stderr = _FakeStderr()
+        self.stdin = None
+        self._exit_gate = exit_gate
+        self.returncode = 0
+
+    async def wait(self) -> int:
+        await self._exit_gate.wait()
+        return self.returncode
+
+
+class TestYieldsBeforeProcExit:
+    """Invariant: CLIProvider.run yields each parsed line while the subprocess
+    is still running, not after proc.wait() returns."""
+
+    async def test_cli_provider_yields_before_proc_exit(self) -> None:
+        exit_gate = asyncio.Event()
+        proc = _GateProc(
+            [
+                b'{"type":"text","text":"one"}\n',
+                b'{"type":"text","text":"two"}\n',
+            ],
+            exit_gate,
+        )
+
+        async def _fake_spawn(*a: Any, **kw: Any) -> _GateProc:
+            return proc
+
+        with patch("asyncio.create_subprocess_exec", _fake_spawn):
+            provider = CLIProvider("fake")
+            gen = provider.run(prompt="hi")
+            first = await asyncio.wait_for(gen.__anext__(), timeout=0.5)
+            second = await asyncio.wait_for(gen.__anext__(), timeout=0.5)
+            # Gate still closed — triple-buffering version would deadlock here.
+            assert first["text"] == "one"
+            assert second["text"] == "two"
+
+            exit_gate.set()
+            turn_end = await asyncio.wait_for(gen.__anext__(), timeout=0.5)
+            assert turn_end.get("type") == "turn_end"
+            with pytest.raises(StopAsyncIteration):
+                await gen.__anext__()
