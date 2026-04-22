@@ -209,9 +209,12 @@ class TestBug66CompletedExistsCheck:
             # The only acceptable RHS shapes are:
             #   - summary_path  (gated by exists() check above it)
             #   - builder_result.output_file  (gated by builder success)
-            assert "summary_path" in w or "builder_result.output_file" in w, (
-                f"bug 66 regression risk: suspicious `completed` write: {w!r}"
-            )
+            #   - skip_summary_rel  (gated by ctx.skip_requested flag, bug 106)
+            assert (
+                "summary_path" in w
+                or "builder_result.output_file" in w
+                or "skip_summary_rel" in w
+            ), f"bug 66 regression risk: suspicious `completed` write: {w!r}"
 
 
 # ── Bug 70: resolve().is_relative_to(project_path) guard ─────────────────

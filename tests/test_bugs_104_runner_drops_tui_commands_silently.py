@@ -1,32 +1,21 @@
 """Bug 104: Runner silently drops unknown commands from the TUI.
 
 The Textual TUI (``tero2/tui/app.py``) binds several keys that post ``Command``
-objects onto ``self._command_queue``:
+objects onto ``self._command_queue``. At the runner side the phase-boundary
+drain loop (``_drain_commands``) and the idle-mode loop (``_idle_loop``) each
+only recognise a fixed subset of command kinds. Any command kind not in those
+subsets used to fall through the if-chain and be dropped on the floor with no
+log record.
 
-    * ``k`` → ``Command("skip_task")``        (action_skip)
-    * ``n`` → ``Command("new_project")``      (action_new_project)
-    * ``s``/1–5 → ``Command("steer", ...)``   (SteerScreen + action_stuck_option_N)
+After bug 104 was fixed, steer (bug 105) and skip_task (bug 106) got real
+handlers, but the original diagnostic contract still applies to every OTHER
+unhandled kind — most notably ``new_project`` (which remains feature work)
+and any fresh binding a future TUI author might add.
 
-At the runner side the phase-boundary drain loop (``_drain_commands``) and
-the idle-mode loop (``_idle_loop``) each only recognise a fixed subset of
-command kinds:
-
-    * ``_drain_commands`` handles:   stop, pause, switch_provider
-    * ``_idle_loop`` handles:        stop, switch_provider, new_plan
-
-Every other command is dequeued but falls through the if-chain and is
-dropped on the floor without any log record. The user presses ``k`` to
-skip a task, sees nothing change, and has zero diagnostic signal. The
-footer advertises bindings that do nothing.
-
-This test pins the **diagnostic** contract: while the UX gap (actually
-wiring those commands to runner behaviour) is a larger piece of work, the
-minimum defensive behaviour is that an unhandled command MUST produce a
-visible log warning so that dead bindings surface in logs and future
-operators notice the gap.
-
-Halal pair: would fail without the added ``log.warning(...)`` at the end
-of each command loop.
+This test pins the minimum defensive behaviour: **truly unhandled** commands
+must produce a visible log warning so dead bindings surface in logs and
+future operators notice the gap. It also guarantees the new handlers do NOT
+emit the 'unsupported' warning — because they ARE supported now.
 """
 
 from __future__ import annotations
@@ -67,53 +56,8 @@ def _running_state() -> AgentState:
     return AgentState(phase=Phase.RUNNING)
 
 
-class TestDrainCommandsLogsUnknown:
-    """Unknown commands at the phase boundary must produce a WARNING log."""
-
-    async def test_skip_task_command_is_logged_not_silently_dropped(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        runner, cq = _make_runner(tmp_path)
-        cq.put_nowait(Command("skip_task", source="tui"))
-
-        state = _running_state()
-        with caplog.at_level(logging.WARNING, logger="tero2.runner"):
-            new_state, should_continue = await runner._drain_commands(state)
-
-        assert should_continue is True, (
-            "skip_task is not a stop/pause signal — runner must keep going"
-        )
-        assert cq.empty(), "unhandled command must still be drained from the queue"
-        warnings = [
-            r.getMessage() for r in caplog.records if r.levelno == logging.WARNING
-        ]
-        assert any("skip_task" in m and "unsupported" in m for m in warnings), (
-            "unknown command must produce a warning containing the kind. "
-            f"got warnings={warnings!r}"
-        )
-        assert any("tui" in m for m in warnings), (
-            "warning must name the source (tui) so the operator can trace "
-            f"which binding fired. got warnings={warnings!r}"
-        )
-
-    async def test_steer_stuck_option_is_logged(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        runner, cq = _make_runner(tmp_path)
-        cq.put_nowait(
-            Command("steer", data={"text": "stuck_option_2"}, source="tui")
-        )
-
-        with caplog.at_level(logging.WARNING, logger="tero2.runner"):
-            _, should_continue = await runner._drain_commands(_running_state())
-
-        assert should_continue is True
-        warnings = [
-            r.getMessage() for r in caplog.records if r.levelno == logging.WARNING
-        ]
-        assert any("steer" in m for m in warnings), (
-            f"steer command must be logged, got: {warnings!r}"
-        )
+class TestUnhandledCommandsStillLogged:
+    """Commands without a handler must still produce a WARNING log."""
 
     async def test_new_project_is_logged(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
@@ -124,23 +68,59 @@ class TestDrainCommandsLogsUnknown:
         )
 
         with caplog.at_level(logging.WARNING, logger="tero2.runner"):
+            _, should_continue = await runner._drain_commands(_running_state())
+
+        assert should_continue is True
+        warnings = [
+            r.getMessage() for r in caplog.records if r.levelno == logging.WARNING
+        ]
+        assert any("new_project" in m and "unsupported" in m for m in warnings), (
+            f"new_project must surface in logs, got: {warnings!r}"
+        )
+
+    async def test_fresh_unknown_kind_is_logged(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Any future TUI binding that adds a new Command.kind without a
+        matching runner handler must also produce a warning — the guard is
+        kind-agnostic."""
+        runner, cq = _make_runner(tmp_path)
+        cq.put_nowait(Command("unknown_future_kind", source="tui"))
+
+        with caplog.at_level(logging.WARNING, logger="tero2.runner"):
             await runner._drain_commands(_running_state())
 
         warnings = [
             r.getMessage() for r in caplog.records if r.levelno == logging.WARNING
         ]
-        assert any("new_project" in m for m in warnings), (
-            f"new_project must surface in logs, got: {warnings!r}"
-        )
+        assert any(
+            "unknown_future_kind" in m and "unsupported" in m for m in warnings
+        ), f"got warnings={warnings!r}"
 
-    async def test_multiple_unknown_drained_each_logged(
+    async def test_warning_includes_source(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Three unknown commands in a row must produce three warnings."""
+        """The warning must name the Command.source so operators can trace
+        which subsystem fired the dead binding."""
         runner, cq = _make_runner(tmp_path)
-        cq.put_nowait(Command("skip_task", source="tui"))
-        cq.put_nowait(Command("steer", data={"text": "x"}, source="tui"))
+        cq.put_nowait(Command("new_project", source="tui"))
+
+        with caplog.at_level(logging.WARNING, logger="tero2.runner"):
+            await runner._drain_commands(_running_state())
+
+        warnings = [
+            r.getMessage() for r in caplog.records if r.levelno == logging.WARNING
+        ]
+        assert any("tui" in m for m in warnings), (
+            f"warning must name the source 'tui'. got: {warnings!r}"
+        )
+
+    async def test_multiple_unknowns_each_logged(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        runner, cq = _make_runner(tmp_path)
         cq.put_nowait(Command("new_project", data={"path": "/x"}, source="tui"))
+        cq.put_nowait(Command("hypothetical_future_cmd", source="tui"))
 
         with caplog.at_level(logging.WARNING, logger="tero2.runner"):
             _, should_continue = await runner._drain_commands(_running_state())
@@ -150,25 +130,28 @@ class TestDrainCommandsLogsUnknown:
         warnings = [
             r.getMessage() for r in caplog.records if r.levelno == logging.WARNING
         ]
-        for kind in ("skip_task", "steer", "new_project"):
+        for kind in ("new_project", "hypothetical_future_cmd"):
             assert any(kind in m for m in warnings), (
                 f"expected warning mentioning {kind!r}, got: {warnings!r}"
             )
 
-    async def test_known_commands_still_work_without_warning(
+
+class TestKnownCommandsDoNotTriggerUnsupportedWarning:
+    """Handled commands must NOT produce an 'unsupported' warning. Regression
+    guard — if someone accidentally removes a handler, the commands it used
+    to accept will start emitting unsupported warnings and fail these tests.
+    """
+
+    async def test_pause_is_handled(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Regression: stop/pause must still short-circuit; no stray warnings."""
         runner, cq = _make_runner(tmp_path)
         cq.put_nowait(Command("pause", source="tui"))
 
-        state = _running_state()
         with caplog.at_level(logging.WARNING, logger="tero2.runner"):
-            _, should_continue = await runner._drain_commands(state)
+            _, should_continue = await runner._drain_commands(_running_state())
 
-        assert should_continue is False, (
-            "pause must halt the phase loop (regression check)"
-        )
+        assert should_continue is False
         warnings = [
             r.getMessage() for r in caplog.records if r.levelno == logging.WARNING
         ]
@@ -176,7 +159,7 @@ class TestDrainCommandsLogsUnknown:
             f"pause must not produce 'unsupported' warning. got: {warnings!r}"
         )
 
-    async def test_switch_provider_still_works_without_warning(
+    async def test_switch_provider_is_handled(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         from tero2.config import RoleConfig
@@ -203,16 +186,13 @@ class TestDrainCommandsLogsUnknown:
             f"switch_provider must not produce 'unsupported' warning. got: {warnings!r}"
         )
 
-
-class TestSourceAnnotationRegression:
-    """The warning must include the Command.source so operators can trace
-    which subsystem fired the dead binding. A TUI-sourced command that's
-    dropped must produce a warning that names the TUI."""
-
-    async def test_warning_includes_source(
+    async def test_steer_and_skip_task_do_not_emit_unsupported(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
+        """steer (bug 105) and skip_task (bug 106) have real handlers now;
+        they must NOT fall through to the 'unsupported' branch."""
         runner, cq = _make_runner(tmp_path)
+        cq.put_nowait(Command("steer", data={"text": "focus on X"}, source="tui"))
         cq.put_nowait(Command("skip_task", source="tui"))
 
         with caplog.at_level(logging.WARNING, logger="tero2.runner"):
@@ -221,8 +201,9 @@ class TestSourceAnnotationRegression:
         warnings = [
             r.getMessage() for r in caplog.records if r.levelno == logging.WARNING
         ]
-        # The specific source string must appear — this is the diagnostic
-        # payload that lets the operator attribute the dropped command.
-        assert any("tui" in m for m in warnings), (
-            f"warning must name the source 'tui'. got: {warnings!r}"
+        assert not any(
+            "unsupported" in m and ("steer" in m or "skip_task" in m) for m in warnings
+        ), (
+            f"steer/skip_task must not produce 'unsupported' warning — they have "
+            f"handlers. got: {warnings!r}"
         )

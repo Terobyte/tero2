@@ -82,6 +82,10 @@ class Runner:
         self._dispatcher = dispatcher
         self._command_queue = command_queue
         self._ctx: RunnerContext | None = None
+        # Set True by a `skip_task` TUI command; consumed (and cleared) by
+        # execute_phase at the next attempt boundary to advance past the
+        # currently-running task without waiting for its natural completion.
+        self._skip_current_task: bool = False
 
     async def run(self) -> None:
         _shutdown_event = asyncio.Event()
@@ -245,6 +249,39 @@ class Runner:
                                 priority=True,
                             )
                         )
+                continue
+            if cmd.kind == "steer":
+                text = cmd.data.get("text", "") if cmd.data else ""
+                if not text:
+                    log.warning("runner: steer command with empty text — ignoring")
+                    continue
+                if text.startswith("stuck_option_"):
+                    # stuck_option_N is an opaque code produced by the stuck
+                    # dialog — each option means a different recovery action
+                    # (temp-up, rollback, diversify, coach, human escalation)
+                    # and those semantics live in the escalation subsystem.
+                    # Marshal through STEER.md so execute_phase picks it up on
+                    # the next attempt boundary and treats it as a human hint.
+                    self.disk.write_steer(f"[stuck-option] {text}")
+                    log.info("runner: stuck option %s persisted to STEER.md", text)
+                else:
+                    self.disk.write_steer(text)
+                    log.info(
+                        "runner: steer text persisted to STEER.md (%d chars)",
+                        len(text),
+                    )
+                continue
+            if cmd.kind == "skip_task":
+                # Soft skip: signal execute_phase to advance past the current
+                # task at its next attempt boundary. We cannot bail out of the
+                # running attempt here, only set a flag the phase checks.
+                if self._ctx is not None:
+                    self._ctx.skip_requested = True
+                self._skip_current_task = True  # legacy mirror
+                log.info(
+                    "runner: skip_task requested — current attempt will finish, "
+                    "then execute_phase advances to the next task"
+                )
                 continue
             log.warning(
                 "runner: dropping unsupported command %r from %s (data=%r) — "

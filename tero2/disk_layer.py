@@ -119,6 +119,15 @@ class DiskLayer:
     def read_steer(self) -> str:
         return self.read_file("human/STEER.md") or ""
 
+    def write_steer(self, text: str) -> None:
+        """Persist human steering input. Consumed by execute_phase/runner on
+        subsequent attempt boundaries via ``read_steer``.
+        """
+        self.write_file("human/STEER.md", text)
+
+    def clear_steer(self) -> None:
+        (self.sora_dir / "human" / "STEER.md").unlink(missing_ok=True)
+
     def clear_override(self) -> None:
         (self.sora_dir / "human" / "OVERRIDE.md").unlink(missing_ok=True)
 

@@ -35,6 +35,7 @@ Crash recovery:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timezone
@@ -221,6 +222,37 @@ async def run_execute(
         task_passed = False
 
         for attempt in range(max_cycles + 1):
+            # Drain skip_task commands from the queue so the TUI 'k' binding
+            # takes effect mid-slice, not only at the next phase boundary.
+            # Commands we don't understand are re-queued untouched — the
+            # phase-boundary _drain_commands in runner handles them later.
+            _drain_skip_commands(ctx)
+
+            # Skip-task check: TUI 'k' binding sets ctx.skip_requested via the
+            # runner's command drain loop. Acknowledge here (between attempts)
+            # so the current in-flight work finishes but we don't retry.
+            if ctx.skip_requested:
+                log.warning(
+                    "execute: task %s skipped via TUI skip_task command "
+                    "(after attempt %d)",
+                    task.id,
+                    attempt,
+                )
+                ctx.skip_requested = False
+                skip_summary_rel = (
+                    f"{slice_plan.slice_dir}/{task.id}-SUMMARY.md"
+                )
+                skip_summary_abs = ctx.disk.sora_dir / skip_summary_rel
+                skip_summary_abs.parent.mkdir(parents=True, exist_ok=True)
+                skip_summary_abs.write_text(
+                    f"# {task.id} Summary\n"
+                    f"skipped via TUI 'k' binding at attempt {attempt}\n",
+                    encoding="utf-8",
+                )
+                completed[task.id] = skip_summary_rel
+                task_passed = True  # soft-pass so the slice keeps moving
+                break
+
             # OVERRIDE.md check each attempt iteration.
             override_result = _check_override(ctx, slice_plan.slice_id, completed)
             if override_result is not None:
@@ -439,6 +471,32 @@ async def run_execute(
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────
+
+
+def _drain_skip_commands(ctx: RunnerContext) -> None:
+    """Sift ``skip_task`` commands out of the queue without disturbing others.
+
+    Runner's ``_drain_commands`` only fires at phase boundaries, which is too
+    coarse for a TUI ``k`` binding: a user pressing 'k' during task T02 wants
+    T02 to stop retrying right now, not at the end of the slice. This helper
+    pops every command from ``ctx.command_queue``, sets ``ctx.skip_requested``
+    if any was a ``skip_task``, and re-queues the rest for the next phase-
+    boundary drain (where stop/pause/switch_provider are handled).
+    """
+    if ctx.command_queue is None:
+        return
+    keep = []
+    while not ctx.command_queue.empty():
+        try:
+            cmd = ctx.command_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+        if getattr(cmd, "kind", None) == "skip_task":
+            ctx.skip_requested = True
+        else:
+            keep.append(cmd)
+    for cmd in keep:
+        ctx.command_queue.put_nowait(cmd)
 
 
 def _check_override(

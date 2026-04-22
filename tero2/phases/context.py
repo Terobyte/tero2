@@ -83,6 +83,10 @@ class RunnerContext:
     escalation_level: EscalationLevel = EscalationLevel.NONE
     div_steps: int = 0
     escalation_history: list[EscalationLevel] = field(default_factory=list)
+    # Set by Runner._drain_commands when the TUI ``skip_task`` binding fires.
+    # Consumed (and cleared) by execute_phase at the next attempt boundary
+    # to soft-skip the current task.
+    skip_requested: bool = False
 
     def reset(self) -> None:
         self.escalation_level = EscalationLevel.NONE
