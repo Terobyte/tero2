@@ -496,10 +496,43 @@ _RE_PAUSE = re.compile(r"^\s*PAUSE\s*$", re.MULTILINE | re.IGNORECASE)
 # Group 1: backtick-quoted inline command  e.g. "`swift test`"
 # Group 2: line starting with a known CLI tool (after "- " prefix already stripped)
 _CMD_RE = re.compile(
-    r"`([^`]+)`"   # backtick-quoted inline command
+    r"`([^`]+)`"   # backtick-quoted inline command (filtered below)
     r"|(?:^|[-*]\s*)((?:cd|swift|ctest|make|cmake|cargo|npm|yarn|pnpm|pytest|go|\./)[^\n`]*)",
     re.MULTILINE,
 )
+
+# Known executable prefixes. A backtick span only counts as a command when
+# its first whitespace-delimited token matches one of these (or starts with
+# "./"). Without this filter, every identifier and file path in the
+# markdown plan (`stringy/utils.py`, `reverse_string`, etc.) is treated as
+# a runnable command and fed to the verifier, producing spurious
+# "Permission denied" errors on files that are obviously not executables.
+_KNOWN_EXECUTABLES: frozenset[str] = frozenset({
+    "cd", "echo", "ls", "cat", "git",
+    "python", "python3", "py", "pip", "pip3", "poetry", "uv", "pdm",
+    "pytest", "ruff", "mypy", "black", "isort", "flake8", "pylint",
+    "swift", "ctest", "make", "cmake", "bazel", "ninja",
+    "cargo", "rustc", "go", "node", "deno", "bun", "npm", "yarn", "pnpm",
+    "npx", "pnpx", "tsc", "vitest", "jest",
+    "bash", "sh", "zsh",
+})
+
+
+def _looks_like_command(s: str) -> bool:
+    """Heuristic — distinguish real commands from backticked identifiers/paths.
+
+    Accepts strings whose first token matches :data:`_KNOWN_EXECUTABLES`,
+    or which start with ``./`` (explicit relative-path executable). All
+    other backticked text (module names, function signatures, type
+    annotations, file paths) is rejected.
+    """
+    s = s.strip()
+    if not s:
+        return False
+    if s.startswith("./"):
+        return True
+    first = s.split(None, 1)[0].lower()
+    return first in _KNOWN_EXECUTABLES
 
 
 def _extract_must_have_commands(task: Task) -> list[str]:
@@ -514,7 +547,7 @@ def _extract_must_have_commands(task: Task) -> list[str]:
     for item in task.must_haves:
         for match in _CMD_RE.finditer(item):
             cmd = (match.group(1) or match.group(2) or "").strip()
-            if cmd and cmd not in cmds:
+            if cmd and cmd not in cmds and _looks_like_command(cmd):
                 cmds.append(cmd)
     return cmds
 
