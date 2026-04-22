@@ -338,6 +338,31 @@ class Runner:
                     "then execute_phase advances to the next task"
                 )
                 continue
+            if cmd.kind == "new_plan":
+                # User picked a new plan via TUI PlanPickScreen mid-execution.
+                # Destructive — current plan's work is abandoned. Mark state
+                # failed so the phase loop exits cleanly, re-queue the command
+                # so _idle_loop picks it up and starts the new plan fresh.
+                text = cmd.data.get("text", "") if cmd.data else ""
+                if not text:
+                    log.warning(
+                        "runner: new_plan command with empty text — ignoring"
+                    )
+                    continue
+                log.info(
+                    "runner: new_plan requested mid-execution — aborting current "
+                    "plan and restarting with %r",
+                    text,
+                )
+                state = self.checkpoint.mark_failed(
+                    state,
+                    f"superseded by new_plan via {cmd.source or 'command'}",
+                )
+                self._current_state = state
+                # Re-queue so _idle_loop's new_plan handler picks it up after
+                # _execute_plan returns.
+                self._command_queue.put_nowait(cmd)
+                return state, False
             log.warning(
                 "runner: dropping unsupported command %r from %s (data=%r) — "
                 "no handler registered at phase boundary",
