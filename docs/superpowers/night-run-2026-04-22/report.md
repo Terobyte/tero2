@@ -14,9 +14,9 @@
 
 | Metric | Value |
 |---|---|
-| Bugs closed | **25** (numbered 98-122) |
-| Halal (tests cover the bug) | 25 / 25 |
-| TDD-verified (test seen to fail on broken code) | 13 / 25 (bugs 110-122) |
+| Bugs closed | **26** (numbered 98-123) |
+| Halal (tests cover the bug) | 26 / 26 |
+| TDD-verified (test seen to fail on broken code) | 14 / 26 (bugs 110-123) |
 | Green iterations on `easy-three.md` | **2** (iter-8 and iter-9, reproducible) |
 | Commits on branch | 21 |
 | Test suite | 1665 passing, 18 pre-existing failures (stream_bus + bug 8 dup) |
@@ -91,6 +91,7 @@ exercises. All three were written **test-first** per the TDD discipline.
 | 120 | `_extract_list` used `re.IGNORECASE` with `$`+MULTILINE, so pytest's lowercase summary line `N failed in Xs` matched the same pattern as real `FAILED tests/…` lines. Garbage like `in 0.5s =====` leaked into `failed_tests`, then into reflexion prompts as a "specific test name that failed", corrupting the LLM's fix-guidance. Dropped IGNORECASE — pytest convention distinguishes uppercase result lines from lowercase summary | `72c70b9` | 2/4 tests red before fix |
 | 121 | `DiskLayer.read_file` caught `FileNotFoundError` and `OSError` but not `UnicodeDecodeError` (a `ValueError` subclass, not `OSError`). Operator-written files (`human/STEER.md`, `human/OVERRIDE.md`, `persistent/PROJECT.md`) saved in cp1252/latin-1 would propagate the exception out, crashing a long-running runner. Added to except tuple — degrade to `""` like other unreadable files | `127f54f` | 3/5 tests red before fix |
 | 122 | `UsageTracker.session_summary` iterated `self._providers` outside `_providers_lock`. Bug 118 made writes safe, but the read path (TUI refresh from the asyncio loop) could race worker-thread `record_step` calls inserting fresh provider keys → `RuntimeError: dictionary changed size during iteration`. Read under the same lock — completes the pair to bug 118 | `e17207c` | 2/3 tests red before fix (structural + behavioural race) |
+| 123 | `builder._recover_summary_from_disk` iterated candidate paths with `except (OSError, FileNotFoundError)` — a single non-UTF-8 SUMMARY.md raised `UnicodeDecodeError` out of the loop (ValueError subclass, not OSError), aborting recovery and preventing the remaining candidates from being tried. Same shape as bug 121 in `DiskLayer`. Added to the except tuple so the loop skips the bad candidate | `dac7789` | 1/3 tests red before fix |
 
 ---
 
