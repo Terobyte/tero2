@@ -333,10 +333,14 @@ def validate_plan(plan: str) -> list[str]:
 
 # ── Internal helpers ─────────────────────────────────────────────────────
 
-_TASK_RE = re.compile(r"^##\s+T\d{2}[:\s]", re.MULTILINE)
+# Task header regexes must accept both the strict form ``## T01: ...`` and the
+# natural LLM-produced form ``## Task T01: ...`` (optional words between the
+# heading markers and the task ID). The lazy ``[^\n]*?`` bounds the prefix
+# to a single line and keeps the anchoring on ``T\d{2}[:\s]`` unambiguous.
+_TASK_RE = re.compile(r"^##\s+[^\n]*?T\d{2}[:\s]", re.MULTILINE)
 _TASK_ID_RE = re.compile(r"T\d{2}")
 _MUST_HAVE_RE = re.compile(r"must.{0,3}have", re.IGNORECASE)
-_TASK_SPLIT_RE = re.compile(r"^(##\s+T\d{2}[:\s][^\n]*)", re.MULTILINE)
+_TASK_SPLIT_RE = re.compile(r"^(##\s+[^\n]*?T\d{2}[:\s][^\n]*)", re.MULTILINE)
 
 
 def _count_tasks(plan: str) -> int:
