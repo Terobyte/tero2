@@ -183,6 +183,18 @@ class AgentState:
         except (OSError, UnicodeDecodeError):
             log.warning("AgentState.from_file: cannot read %s — starting fresh", path)
             return cls()
+        except ValueError as exc:
+            # from_json raises ValueError on corrupted JSON or wrong shape.
+            # Losing a STATE.json is bad, but crashing the runner on startup
+            # is worse: prefer a fresh state with a loud warning so the next
+            # save overwrites the bad file rather than leaving the agent
+            # stuck in an import-time crash loop.
+            log.error(
+                "AgentState.from_file: corrupted state at %s (%s) — starting fresh",
+                path,
+                exc,
+            )
+            return cls()
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
