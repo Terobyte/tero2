@@ -180,9 +180,15 @@ async def run_execute(
 
         # STEER.md reload at task boundary — use as effective context_hints
         # when the human has posted new steering instructions.
+        # Bug 119: clear after applying so the directive is consumed once
+        # per task rather than replayed into every subsequent task's
+        # context (and in particular the auto-written 'stuck-recovery
+        # option-N …' text from bug 107). Mirrors bug 116's consume-and-
+        # clear pattern for Coach.
         steer_content = ctx.disk.read_steer()
         if steer_content:
             context_hints = steer_content
+            ctx.disk.clear_steer()
 
         # Per-task stuck counter reset (Bug 16 fix).
         # increment_retry leaves these counters stale across task transitions;
