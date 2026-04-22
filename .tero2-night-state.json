@@ -10,7 +10,9 @@
     {"n": 101, "summary": "builder treated silent-but-successful agents as failures", "fixed": true, "commit": "5c674af", "halal": true},
     {"n": 102, "summary": "execute_phase failed slice when resumed task had no SUMMARY.md", "fixed": true, "commit": "48781af", "halal": true},
     {"n": 103, "summary": "verifier ran backticked identifiers/filepaths as commands (Permission denied on stringy/utils.py)", "fixed": true, "commit": "942cf62", "halal": true},
-    {"n": 104, "summary": "runner silently dropped unhandled TUI commands (skip_task/steer/new_project)", "fixed": true, "commit": "1c37d25", "halal": true}
+    {"n": 104, "summary": "runner silently dropped unhandled TUI commands (skip_task/steer/new_project)", "fixed": true, "commit": "1c37d25", "halal": true},
+    {"n": 105, "summary": "TUI steer (SteerScreen + stuck_option_1..5) posted to queue but runner had no handler; now persisted to STEER.md", "fixed": true, "commit": "98bb582", "halal": true},
+    {"n": 106, "summary": "TUI skip_task ('k') posted to queue but nothing consumed mid-slice; now drained per-attempt, soft-passes with placeholder SUMMARY.md", "fixed": true, "commit": "98bb582", "halal": true}
   ],
   "provider_switches": [],
   "investigations": [
