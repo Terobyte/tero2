@@ -162,7 +162,11 @@ class ArchitectPlayer(BasePlayer):
 
         Checks candidate locations in order:
         1. ``{working_dir}/{slice_id}-PLAN.md`` — agent CLI working dir (project root)
-        2. ``{milestone_path}/{slice_id}/{slice_id}-PLAN.md`` — .sora milestone dir
+        2. ``{working_dir}/plans/{slice_id}-PLAN.md`` — common project convention
+           (opencode / codex often write plan files inside a ``plans/`` folder
+           at the project root; without this candidate the architect rejects
+           otherwise-valid plans as "plan contains no tasks")
+        3. ``{milestone_path}/{slice_id}/{slice_id}-PLAN.md`` — .sora milestone dir
 
         Returns ``(path_str, content)`` for the first non-empty file whose
         contents pass ``validate_plan``, or the first non-empty file if none
@@ -175,7 +179,9 @@ class ArchitectPlayer(BasePlayer):
         candidate_paths: list[pathlib.Path] = []
 
         if self.working_dir:
-            candidate_paths.append(pathlib.Path(self.working_dir) / f"{slice_id}-PLAN.md")
+            working = pathlib.Path(self.working_dir)
+            candidate_paths.append(working / f"{slice_id}-PLAN.md")
+            candidate_paths.append(working / "plans" / f"{slice_id}-PLAN.md")
 
         # .sora milestone location via disk layer
         sora_path = self.disk.sora_dir / milestone_path / slice_id / f"{slice_id}-PLAN.md"
