@@ -207,6 +207,8 @@ class Runner:
 
         Returns (updated_state, should_continue).
         On stop/pause commands the state is persisted and should_continue=False.
+        Commands whose kind is not recognised by this loop are NOT silently
+        dropped — they produce a warning so that dead TUI bindings surface.
         """
         if self._command_queue is None:
             return state, True
@@ -243,6 +245,14 @@ class Runner:
                                 priority=True,
                             )
                         )
+                continue
+            log.warning(
+                "runner: dropping unsupported command %r from %s (data=%r) — "
+                "no handler registered at phase boundary",
+                cmd.kind,
+                cmd.source or "unknown",
+                cmd.data,
+            )
         return state, True
 
     async def _apply_switch_provider(self, cmd: Command) -> None:
@@ -717,6 +727,15 @@ class Runner:
                 await self._execute_plan(new_state, shutdown_event)
                 # Reset elapsed after each plan execution to restart the idle timer
                 elapsed = 0.0
+                continue
+
+            log.warning(
+                "idle: dropping unsupported command %r from %s (data=%r) — "
+                "no handler registered in idle loop",
+                cmd.kind,
+                cmd.source or "unknown",
+                cmd.data,
+            )
 
     def _build_chain(self, start_index: int = 0, *, role: str = "executor") -> ProviderChain:
         role_cfg = self.config.roles.get(role)
