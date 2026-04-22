@@ -21,18 +21,36 @@ class TestFromFileCorruption:
         _write(p, b"\x80\x81\xfe\xff")
         assert AgentState.from_file(p) == AgentState()
 
-    def test_malformed_json(self, tmp_path: Path) -> None:
+    def test_malformed_json(self, tmp_path: Path, caplog) -> None:
+        """Bug 110: corrupted JSON no longer raises — from_file degrades to
+        a fresh AgentState and logs at ERROR so the operator still sees the
+        corruption. Crashing the runner on every startup for a bad state
+        file is worse than losing the file contents."""
+        import logging
+
         p = tmp_path / "state.json"
         _write(p, b"{bad json!!!")
-        with pytest.raises(ValueError, match="corrupted data"):
-            AgentState.from_file(p)
+
+        with caplog.at_level(logging.ERROR, logger="tero2.state"):
+            result = AgentState.from_file(p)
+
+        assert result == AgentState(), (
+            "corrupted JSON must degrade to fresh default state"
+        )
+        errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+        assert any("corrupted" in m.lower() for m in errors), (
+            f"corruption must surface as ERROR log, got: {errors!r}"
+        )
 
     @pytest.mark.parametrize("payload", [b"[]", b"[1, 2, 3]", b'"x"', b"123", b"null", b"true"])
     def test_wrong_top_level_type(self, tmp_path: Path, payload: bytes) -> None:
+        """Bug 110: wrong top-level shape degrades to fresh state, same as
+        malformed JSON. Callers (runner startup) no longer need to handle
+        ValueError from restore()."""
         p = tmp_path / "state.json"
         _write(p, payload)
-        with pytest.raises(ValueError, match="expected dict"):
-            AgentState.from_file(p)
+        result = AgentState.from_file(p)
+        assert result == AgentState()
 
     def test_valid_state_round_trips(self, tmp_path: Path) -> None:
         s = AgentState(phase=Phase.RUNNING, current_task="do stuff", steps_in_task=3)

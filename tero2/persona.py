@@ -129,13 +129,43 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
 
 
 class PersonaRegistry:
-    """Lazy-loading registry that maps role names to :class:`Persona` objects."""
+    """Lazy-loading registry that maps role names to :class:`Persona` objects.
 
-    def __init__(self, overrides: Mapping[str, str] | None = None) -> None:
+    Args:
+        overrides: Optional mapping ``{role: prompt_text}`` that short-circuits
+            the project/bundled lookup entirely.
+        project_path: Project root whose ``.sora/prompts/`` directory holds
+            per-role overrides.  When omitted the registry falls back to the
+            historical CWD-relative ``.sora/prompts`` path (bug 112
+            back-compat) — but that only works when the process CWD is the
+            project directory.  The runner should always pass this argument.
+    """
+
+    def __init__(
+        self,
+        overrides: Mapping[str, str] | None = None,
+        *,
+        project_path: Path | None = None,
+    ) -> None:
         self._cache: dict[str, Persona] = {}
         self._resolved_cache: dict[str, Persona] = {}
         self._overrides: dict[str, str] = dict(overrides) if overrides else {}
         self._loaded = False
+        self._project_path: Path | None = (
+            Path(project_path) if project_path is not None else None
+        )
+
+    @property
+    def _local_prompts_dir(self) -> Path:
+        """Resolve the project-local prompts directory.
+
+        Uses ``<project_path>/.sora/prompts`` when a project was supplied at
+        construction time; otherwise falls back to the CWD-relative path
+        preserved for legacy callers.
+        """
+        if self._project_path is not None:
+            return self._project_path / ".sora" / "prompts"
+        return _LOCAL_PROMPTS_DIR
 
     def _ensure_loaded(self) -> None:
         if self._loaded:
@@ -155,7 +185,7 @@ class PersonaRegistry:
         cached = self._resolved_cache.get(role)
         if cached is not None:
             return cached
-        local_path = _LOCAL_PROMPTS_DIR / f"{role}.md"
+        local_path = self._local_prompts_dir / f"{role}.md"
         try:
             raw = local_path.read_text(encoding="utf-8")
             meta, body = _parse_frontmatter(raw)

@@ -88,6 +88,20 @@ class RunnerContext:
     # to soft-skip the current task.
     skip_requested: bool = False
 
+    def __post_init__(self) -> None:
+        # Bug 112: when a project_path is known, wire it into the persona
+        # registry so `.sora/prompts/<role>.md` lookup resolves against the
+        # project root rather than the CWD-relative legacy fallback.
+        # Only rewire the default factory registry — caller-supplied registries
+        # (e.g. in unit tests) are respected as-is.
+        if self.project_path and self.personas is not None:
+            import pathlib
+
+            if not self.personas._cache and not self.personas._overrides:
+                self.personas = PersonaRegistry(
+                    project_path=pathlib.Path(self.project_path)
+                )
+
     def reset(self) -> None:
         self.escalation_level = EscalationLevel.NONE
         self.div_steps = 0
