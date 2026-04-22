@@ -105,13 +105,17 @@ class UsageTracker:
     ) -> None:
         """Accumulate token and cost data for one agent step.
 
-        Thread-safe via GIL for simple int/float arithmetic; no async needed here
-        because callers are synchronous step handlers.
+        Bug 118: ``x += y`` on a Python attribute compiles to multiple
+        bytecodes (LOAD, ADD, STORE). The GIL makes each bytecode atomic
+        but does NOT make the read-modify-write sequence atomic, so two
+        threads racing can each load the same value and both store back
+        — a classic lost-update. Keep the scalar increments inside the
+        same lock that guards the per-provider dict.
         """
-        self._total_tokens += tokens
-        self._total_cost += cost
-
         with self._providers_lock:
+            self._total_tokens += tokens
+            self._total_cost += cost
+
             if provider not in self._providers:
                 self._providers[provider] = {
                     "tokens": 0,
