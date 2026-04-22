@@ -65,6 +65,7 @@ class BuilderPlayer(BasePlayer):
 
         prompt = self._build_prompt(persona_prompt, task_plan, reflexion_context, context_hints)
         try:
+            agent_reported_success = False
             if ctx is not None and hasattr(ctx, "run_agent"):
                 # Full agentic execution: stuck detection, step tracking, heartbeat.
                 # run_agent returns (success: bool, captured_output: str).
@@ -77,6 +78,7 @@ class BuilderPlayer(BasePlayer):
                         error="agent run did not succeed",
                         task_id=task_id,
                     )
+                agent_reported_success = True
             else:
                 # Fallback: simple single-response collection (tests / standalone).
                 output = await self._run_prompt(prompt)
@@ -85,12 +87,28 @@ class BuilderPlayer(BasePlayer):
             if not summary:
                 summary = self._recover_summary_from_disk(task_id, self.working_dir)
             if not summary:
-                return BuilderResult(
-                    success=False,
-                    captured_output=output,
-                    error="builder returned empty summary",
-                    task_id=task_id,
-                )
+                # Some agent tools (opencode/codex) write files and commit
+                # without printing anything. When the agent explicitly reported
+                # success, trust it: treat the silent completion as success
+                # with a synthesized placeholder summary so downstream phases
+                # don't see a false-negative "task failed" for work that ran.
+                if agent_reported_success:
+                    log.info(
+                        "builder: agent %s reported success but produced no "
+                        "textual summary — using synthesized placeholder",
+                        task_id,
+                    )
+                    summary = (
+                        f"Task {task_id} completed by agent; "
+                        "no textual summary returned."
+                    )
+                else:
+                    return BuilderResult(
+                        success=False,
+                        captured_output=output,
+                        error="builder returned empty summary",
+                        task_id=task_id,
+                    )
             output_path = f"{milestone_path}/{slice_id}/{task_id}-SUMMARY.md"
             self.disk.write_file(output_path, summary)
             return BuilderResult(
