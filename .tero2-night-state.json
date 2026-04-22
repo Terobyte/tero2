@@ -1,0 +1,33 @@
+{
+  "started_at": "2026-04-22T02:42:00+03:00",
+  "extended_at_msk": "2026-04-22T14:10:00+03:00",
+  "iteration": 8,
+  "phase": "B",
+  "bugs_found": [
+    {"n": 98, "summary": "ProviderChain swallowed provider exceptions", "fixed": true, "commit": "5d204c4", "halal": true},
+    {"n": 99, "summary": "architect _TASK_RE rejected '## Task T01:' headers", "fixed": true, "commit": "ef292f0", "halal": true},
+    {"n": 100, "summary": "architect recovery missed plans/{slice_id}-PLAN.md", "fixed": true, "commit": "9204766", "halal": true},
+    {"n": 101, "summary": "builder treated silent-but-successful agents as failures", "fixed": true, "commit": "5c674af", "halal": true},
+    {"n": 102, "summary": "execute_phase failed slice when resumed task had no SUMMARY.md", "fixed": true, "commit": "48781af", "halal": true},
+    {"n": 103, "summary": "verifier ran backticked identifiers/filepaths as commands (Permission denied on stringy/utils.py)", "fixed": true, "commit": "942cf62", "halal": true},
+    {"n": 104, "summary": "runner silently dropped unhandled TUI commands (skip_task/steer/new_project)", "fixed": true, "commit": "1c37d25", "halal": true}
+  ],
+  "provider_switches": [],
+  "investigations": [
+    {"id": "auto_lock_persistence", "verdict": "not_a_bug"},
+    {"id": "harden_malformed_verdict", "verdict": "open_observation", "reason": "LLM output doesn't reliably include CRITICAL/NO ISSUES FOUND/COSMETIC markers; harden falls through to 'treat as NO ISSUES' after 2 consecutive — acceptable degradation, not blocking"},
+    {"id": "kilo_model_dead", "verdict": "not_tero2_bug", "reason": "kilo/xiaomi/mimo-v2-pro:free 'Model not found'; bug 98 surfaces it but fix is provider config"},
+    {"id": "worktree_not_running", "verdict": "FIXED_via_pythonpath"},
+    {"id": "agents_produce_no_textual_summary", "verdict": "open_observation", "reason": "iter-8 logs show bug 101 synthesized-placeholder branch fires for ALL THREE tasks. Agents never produce textual summaries. Not a bug in tero2 — builder prompt issue or agent UX. Placeholder path is load-bearing."}
+  ],
+  "last_green_run": "iter-8 @ 2026-04-22T10:23 local — 3/3 tasks passed testbed suite green",
+  "phase_B_complete": true,
+  "phase_B_green_confirmed_by": "iter-8 @ 10:23 local (3/3 tasks passed, testbed pytest 11 passed, tero2 net test failures = 0 beyond pre-existing stream_bus/bug8 on main)",
+  "last_sleep_reason": "phase_B_green_running_iter9_for_reproducibility",
+  "stopping_time_msk": "2026-04-23T00:10:00+03:00",
+  "budget_hours": 10,
+  "launch_command": "cd /tmp && PYTHONPATH=<worktree> tero2 run <testbed> --plan easy-three.md --verbose",
+  "iter_8_outcome": "GREEN 3/3 — all 6 bug fixes (98-103) worked in cascade: chain logged per-attempt, architect recovered plan, builder synthesized placeholder 3x, verifier ran only real pytest commands. Testbed ended with 3 commits, 11 passing tests.",
+  "next_action": "iter-9 sanity check, then transition to Phase A (TUI) for remaining budget (~6h)",
+  "bug_66_aligned": "40349bb — bug 102 fix changed skip-with-missing-summary from fail-hard to re-run; bug 66's test updated to assert new contract (spirit preserved: no phantom completed entries)."
+}
