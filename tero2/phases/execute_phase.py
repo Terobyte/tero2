@@ -137,22 +137,29 @@ async def run_execute(
 
     for task_index, task in enumerate(tasks):
         if task_index < start_index:
-            log.info(
-                "execute: skipping already-completed task %s (index %d < %d)",
-                task.id,
-                task_index,
-                start_index,
-            )
             summary_path = f"{slice_plan.slice_dir}/{task.id}-SUMMARY.md"
             if (ctx.disk.sora_dir / summary_path).exists():
-                completed[task.id] = summary_path
-            else:
-                log.warning(
-                    "execute: skipped task %s has no summary on disk — marking run failed",
+                log.info(
+                    "execute: skipping already-completed task %s (index %d < %d)",
                     task.id,
+                    task_index,
+                    start_index,
                 )
-                all_passed = False
-            continue
+                completed[task.id] = summary_path
+                continue
+            # Previous run advanced the task index past this task but left
+            # no SUMMARY.md on disk — we cannot confirm the task actually
+            # succeeded, so re-run it instead of flagging the slice as
+            # failed up-front. Happens e.g. when the prior run crashed
+            # mid-task, or when the builder exited with a false-negative
+            # empty-summary error (see bug 101). Falling through to the
+            # normal execution path lets reflexion/retry take over.
+            log.warning(
+                "execute: task %s was marked skipped (start_index=%d) but has "
+                "no summary on disk — re-running instead of failing the slice",
+                task.id,
+                start_index,
+            )
 
         # ── Task-boundary safety checks ───────────────────────────────────
 

@@ -378,10 +378,22 @@ class TestCrashRecoverySeeding:
         )
 
     async def test_task1_crash_is_seeded(self, tmp_path: Path) -> None:
-        """Crash during task 1 (task_in_progress=True, index=1) → seed reflexion."""
+        """Crash during task 1 (task_in_progress=True, index=1) → seed reflexion.
+
+        Task 0 must have completed successfully before task 1 began, so its
+        ``T01-SUMMARY.md`` is pre-populated — this distinguishes the scenario
+        from the bug-102 case (summary missing → re-run), and lets the test
+        focus on what it actually asserts: that task 1's builder call carries
+        the crash-recovery reflexion context.
+        """
         state = AgentState(current_task_index=1, task_in_progress=True, sora_phase=SoraPhase.ARCHITECT)
         ctx = _make_ctx(tmp_path, state=state)
         ctx.config.reflexion = ReflexionConfig(max_cycles=0)
+
+        # Task 0 succeeded before the crash → its summary is on disk.
+        t01 = ctx.disk.sora_dir / "milestones/M001/S01/T01-SUMMARY.md"
+        t01.parent.mkdir(parents=True, exist_ok=True)
+        t01.write_text("# T01 Summary\nprior run completed task 0")
 
         captured: list[str] = []
 
