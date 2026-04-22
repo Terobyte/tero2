@@ -14,9 +14,9 @@
 
 | Metric | Value |
 |---|---|
-| Bugs closed | **22** (numbered 98-119) |
-| Halal (tests cover the bug) | 22 / 22 |
-| TDD-verified (test seen to fail on broken code) | 10 / 22 (bugs 110-119) |
+| Bugs closed | **23** (numbered 98-120) |
+| Halal (tests cover the bug) | 23 / 23 |
+| TDD-verified (test seen to fail on broken code) | 11 / 23 (bugs 110-120) |
 | Green iterations on `easy-three.md` | **2** (iter-8 and iter-9, reproducible) |
 | Commits on branch | 21 |
 | Test suite | 1665 passing, 18 pre-existing failures (stream_bus + bug 8 dup) |
@@ -88,6 +88,7 @@ exercises. All three were written **test-first** per the TDD discipline.
 | 117 | `TelegramInputBot._download_file` 10 MB cap bypassed when the API response omitted `file_size` — `if file_size and ...` short-circuits to False. Switched to fail-closed (reject when missing OR oversized). Updated one pre-existing test to include file_size in its mock (matches real Telegram shape) | `36068e6` | 2/4 tests red before fix |
 | 118 | `UsageTracker.record_step` incremented `_total_tokens` and `_total_cost` outside the existing `_providers_lock`. `x += y` is LOAD/ADD/STORE — three bytecodes, not atomic under the GIL. Classic lost-update race. Moved scalars inside the same lock; no new lock, no API change. Wrong inline comment ("thread-safe via GIL for simple int/float arithmetic") deleted | `f5b126a` | 2/3 structural tests red before fix (behavioural was flaky-green on broken code) |
 | 119 | `execute_phase` re-read STEER.md at every task boundary and every attempt but never cleared it. The bug 107 auto-written "stuck-recovery option-N …" text (meant as a pause flag) kept leaking into every subsequent task's `context_hints`. Clear after applying — mirror of bug 116's consume-and-clear for Coach | `743612d` | 1/2 tests red before fix |
+| 120 | `_extract_list` used `re.IGNORECASE` with `$`+MULTILINE, so pytest's lowercase summary line `N failed in Xs` matched the same pattern as real `FAILED tests/…` lines. Garbage like `in 0.5s =====` leaked into `failed_tests`, then into reflexion prompts as a "specific test name that failed", corrupting the LLM's fix-guidance. Dropped IGNORECASE — pytest convention distinguishes uppercase result lines from lowercase summary | `72c70b9` | 2/4 tests red before fix |
 
 ---
 
