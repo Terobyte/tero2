@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
@@ -18,6 +19,8 @@ from tero2.errors import (
     RateLimitError,
 )
 from tero2.providers.base import BaseProvider
+
+log = logging.getLogger(__name__)
 
 
 def _is_recoverable_error(exc: BaseException) -> bool:
@@ -139,17 +142,43 @@ class ProviderChain:
                         # Non-recoverable: hard-fail immediately, no retry.
                         # Do NOT touch the circuit breaker — this is a
                         # config/logic error, not a provider availability issue.
+                        log.error(
+                            "provider %s non-recoverable error: %s: %s",
+                            provider.display_name,
+                            type(exc).__name__,
+                            exc,
+                        )
                         raise
                     if yielded_anything:
                         # Recoverable but partial stream already sent: hard-fail.
+                        log.error(
+                            "provider %s failed mid-stream after first yield: %s: %s",
+                            provider.display_name,
+                            type(exc).__name__,
+                            exc,
+                        )
                         cb.record_failure()
                         raise
                     # Recoverable and nothing yielded yet: retry this provider.
                     if attempt >= self._rate_limit_max_retries:
                         # Exhausted retries for this provider — record failure,
                         # then try next provider in the outer loop.
+                        log.error(
+                            "provider %s exhausted after %d attempt(s): %s: %s",
+                            provider.display_name,
+                            attempt + 1,
+                            type(exc).__name__,
+                            exc,
+                        )
                         cb.record_failure()
                         break
+                    log.warning(
+                        "provider %s attempt %d failed (will retry): %s: %s",
+                        provider.display_name,
+                        attempt + 1,
+                        type(exc).__name__,
+                        exc,
+                    )
 
         if not any_attempted:
             raise CircuitOpenError("all providers circuit-broken")
