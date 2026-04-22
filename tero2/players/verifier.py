@@ -163,7 +163,12 @@ def _parse_verdict(output: str, return_codes: list[int]) -> str:
 
 
 def _extract_list(output: str, label: str) -> list[str]:
-    pattern = re.compile(rf"{re.escape(label)}\s*(.+)$", re.MULTILINE | re.IGNORECASE)
+    # Bug 120: IGNORECASE made pytest's lowercase summary line
+    # ("N failed in Xs") match the same pattern as a real FAILED test
+    # line, polluting failed_tests with garbage like "in 0.5s =====".
+    # pytest emits uppercase FAILED only on per-test result lines;
+    # case-sensitive matching cleanly separates summary from results.
+    pattern = re.compile(rf"{re.escape(label)}\s*(.+)$", re.MULTILINE)
     matches = pattern.findall(output)
     items: list[str] = []
     for m in matches:
