@@ -133,9 +133,18 @@ class UsageTracker:
                 entry["is_estimated"] = True
 
     def session_summary(self) -> dict[str, Any]:
-        """Return totals and per-provider breakdown for the current session."""
-        return {
-            "total_tokens": self._total_tokens,
-            "total_cost": self._total_cost,
-            "providers": {k: dict(v) for k, v in self._providers.items()},
-        }
+        """Return totals and per-provider breakdown for the current session.
+
+        Bug 122: bug 118 closed the write-side race on the scalar totals,
+        but left ``session_summary`` iterating ``_providers`` without the
+        lock. TUI reads run concurrently with worker-thread record_step
+        calls that may insert fresh provider keys, and "dictionary
+        changed size during iteration" can surface. Read under the same
+        lock that guards writes.
+        """
+        with self._providers_lock:
+            return {
+                "total_tokens": self._total_tokens,
+                "total_cost": self._total_cost,
+                "providers": {k: dict(v) for k, v in self._providers.items()},
+            }
