@@ -14,7 +14,8 @@
     {"n": 105, "summary": "TUI steer (SteerScreen + stuck_option_1..5) posted to queue but runner had no handler; now persisted to STEER.md", "fixed": true, "commit": "98bb582", "halal": true},
     {"n": 106, "summary": "TUI skip_task ('k') posted to queue but nothing consumed mid-slice; now drained per-attempt, soft-passes with placeholder SUMMARY.md", "fixed": true, "commit": "98bb582", "halal": true},
     {"n": 107, "summary": "stuck_option_1..5 were opaque codes in STEER.md; now translated to actionable hints and option 5 triggers mark_paused + Telegram notify", "fixed": true, "commit": "38682ca", "halal": true},
-    {"n": 108, "summary": "TUI new_plan ('l') mid-execution was silently dropped; now aborts current plan (FAILED) + re-queues for _idle_loop", "fixed": true, "commit": "c38e02a", "halal": true}
+    {"n": 108, "summary": "TUI new_plan ('l') mid-execution was silently dropped; now aborts current plan (FAILED) + re-queues for _idle_loop", "fixed": true, "commit": "c38e02a", "halal": true},
+    {"n": 109, "summary": "pause/stop had no dispatcher event (invisible in TUI); no way to resume once paused (TUI only had 'p' binding)", "fixed": true, "commit": "1ed1de3", "halal": true}
   ],
   "provider_switches": [],
   "investigations": [
