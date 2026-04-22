@@ -135,11 +135,15 @@ class DiskLayer:
         path = Path(plan_file)
         if not path.is_absolute():
             path = self.project_path / path
-        # Resolve symlinks and validate path stays within project_path
+        # Resolve symlinks and validate path stays within project_path.
+        # Bug 114: use Path.is_relative_to (path-segment aware) rather than
+        # str.startswith — a sibling directory with a shared name prefix
+        # (/tmp/proj vs /tmp/proj-evil) passes a raw prefix match but is not
+        # actually inside the project.
         try:
             resolved = path.resolve()
             project_resolved = self.project_path.resolve()
-            if not str(resolved).startswith(str(project_resolved)):
+            if not resolved.is_relative_to(project_resolved):
                 raise ValueError(
                     f"path traversal detected: {plan_file!r} resolves outside "
                     f"project directory ({project_resolved})"
