@@ -312,33 +312,28 @@ def test_a19_record_run_sort_failure_leaves_history_corrupted(tmp_path):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# A24 — config_writer.py: .lock and .tmp files not cleaned up after save
+# A24 / bug 115 — config_writer.py cleanup contract
+#
+# These tests were originally written in the cleanliness-over-correctness
+# frame: "no .lock file should remain after a write." Bug 115 (commit 9df277b)
+# reversed that on the lock file specifically: unlinking a flock path while
+# holders may still have the old inode open breaks mutual exclusion (a later
+# writer O_CREATs a fresh inode and acquires its own flock, while a prior
+# writer is still on the old inode). Persisting the lock file is the
+# race-free contract.
+#
+# The tmp-file half of the contract is unchanged: .tmp is a scratch artefact
+# that MUST be cleaned up on success (via rename) and on failure (via the
+# finally block's unlink).
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_a24_no_lock_file_leftover_after_successful_write(tmp_path):
-    """A24 (success path) — write_global_config_section must delete .lock after success.
+    """Post-bug-115 contract: .tmp is consumed on success, .lock persists.
 
-    Current code (config_writer.py lines 91–107)::
-
-        lock_path = config_path.with_suffix(".lock")
-        lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
-        try:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX)
-            ...
-            tmp.replace(config_path)        # .tmp consumed on success
-        finally:
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)
-            os.close(lock_fd)               # fd closed, but lock FILE never deleted
-
-    Bug: ``lock_path`` is created with ``os.O_CREAT`` but never unlinked.
-    After each successful save the ``.lock`` file remains on disk.  Repeated
-    saves accumulate this file (only one, but it grows in mtime and leaves
-    noise).  More importantly, the pattern violates the contract of
-    "atomically update" — a clean atomic write must leave no temp artefacts.
-
-    This test calls write_global_config_section and asserts that no ``.lock``
-    file exists after the call.  With the current code, the ``.lock`` file is
-    created and never deleted → assertion fails.
+    The old assertion (.lock must be unlinked after success) is what bug 115
+    fixed — unlinking broke flock exclusivity across concurrent writers. We
+    now assert the opposite for the lock path, and keep the tmp-path
+    assertion unchanged.
     """
     from tero2.config_writer import write_global_config_section
 
@@ -348,34 +343,26 @@ def test_a24_no_lock_file_leftover_after_successful_write(tmp_path):
 
     write_global_config_section(config_path, "telegram", {"bot_token": "tok", "enabled": True})
 
-    assert not lock_path.exists(), (
-        f"BUG: .lock file {lock_path} still exists after successful "
-        "write_global_config_section().  The file is created via os.O_CREAT "
-        "(config_writer.py line 92) but the finally block only calls "
-        "fcntl.flock(LOCK_UN) and os.close() — it never calls os.unlink() on "
-        "the lock path.  Repeated saves accumulate this orphaned lock file.  "
-        "Fix: add os.unlink(str(lock_path)) in the finally block."
+    assert lock_path.exists(), (
+        "bug 115 contract: the flock file must persist across writes — "
+        "unlinking it allows a second writer to create a new-inode lock "
+        "while the previous holder is still on the old inode."
     )
 
     assert not tmp_path_file.exists(), (
-        f"BUG: .tmp file {tmp_path_file} still exists after successful "
+        f"scratch .tmp file {tmp_path_file} still exists after successful "
         "write_global_config_section().  Expected tmp.replace(config_path) to "
         "consume the temp file; check that no second .tmp path is left behind."
     )
 
 
 def test_a24_no_temp_files_leftover_after_failed_write(tmp_path):
-    """A24 (failure path) — write_global_config_section must clean up .lock on error.
+    """Post-bug-115 contract: on failure, .tmp is cleaned, .lock persists.
 
-    Bug: when an exception occurs inside the try block (e.g. a write error or
-    serialisation failure), the ``finally`` block runs but only releases the
-    flock and closes the fd.  The ``.lock`` file is never deleted.  If the
-    error occurs after ``.tmp`` was written but before ``tmp.replace()``,
-    the ``.tmp`` also remains.
-
-    This test patches ``tmp.write_text`` to raise ``OSError`` mid-write and
-    asserts that neither the ``.lock`` nor the ``.tmp`` file remains after the
-    exception propagates.  With the current code, ``.lock`` is left behind.
+    Prior version of this test asserted .lock was removed on failure too —
+    bug 115 reversed that for the same reason as the success-path case. The
+    .tmp cleanup is still required: .tmp is a scratch artefact owned by the
+    writer, and the finally block must unlink it on error.
     """
     from tero2.config_writer import write_global_config_section
 
@@ -397,13 +384,10 @@ def test_a24_no_temp_files_leftover_after_failed_write(tmp_path):
         except OSError:
             pass  # expected — the injected error propagates
 
-    assert not lock_path.exists(), (
-        f"BUG: .lock file {lock_path} remains after failed "
-        "write_global_config_section().  The finally block (config_writer.py "
-        "lines 105–107) releases the flock and closes the fd but never calls "
-        "os.unlink(str(lock_path)).  This leaves an orphaned lock file every "
-        "time a write fails.  Fix: add os.unlink() for both .lock and .tmp "
-        "(guarded with try/except for missing files) in the finally block."
+    assert lock_path.exists(), (
+        "bug 115 contract: the flock file must persist even when the write "
+        "fails — same race rationale as the success path. Writers may be "
+        "mid-acquire on the old inode when this one releases."
     )
 
     assert not tmp_file.exists(), (
