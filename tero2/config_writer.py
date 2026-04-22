@@ -103,7 +103,10 @@ def write_global_config_section(config_path: Path, section: str, values: dict) -
                 tmp.unlink(missing_ok=True)
             except OSError:
                 pass
-        try:
-            lock_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+        # Bug 115: do NOT unlink the lock file here. Removing a lock-file
+        # dirent while a flock on its inode may still be held (by another
+        # process that opened it before we released) breaks the mutual-
+        # exclusion contract: a later process O_CREATs a fresh inode and
+        # flocks that one, while the previous holder is still on the old
+        # inode. The file is tiny, persistence is free, and the race is
+        # real. Leave the dirent in place.
