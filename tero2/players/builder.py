@@ -170,6 +170,10 @@ def _recover_summary_from_disk(task_id: str, working_dir: str) -> str:
             if content:
                 log.info("builder: recovered summary from disk at %s", path)
                 return content
-        except (OSError, FileNotFoundError):
+        except (OSError, FileNotFoundError, UnicodeDecodeError):
+            # Bug 123 (mirror of bug 121): UnicodeDecodeError is a
+            # ValueError, not an OSError, so a single non-UTF-8 candidate
+            # escaped the loop and aborted the whole recovery. Skip it
+            # the same way we skip missing/unreadable ones.
             continue
     return ""
