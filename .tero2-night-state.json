@@ -22,7 +22,10 @@
     {"n": 113, "summary": "Telegram bot /cmd@botname (group-chat syntax) silently rejected as unknown command", "fixed": true, "commit": "730d7e5", "halal": true, "tdd_verified": true},
     {"n": 114, "summary": "DiskLayer.read_plan used str.startswith for path-traversal check — accepted sibling directories sharing a name prefix (/proj vs /proj-evil)", "fixed": true, "commit": "74cae13", "halal": true, "tdd_verified": true},
     {"n": 115, "summary": "config_writer.write_global_config_section unlinked its flock file in finally — creates dual-lock race where two processes hold flock on different inodes", "fixed": true, "commit": "9df277b", "halal": true, "tdd_verified": true},
-    {"n": 116, "summary": "CoachPlayer read STEER.md on every run but never cleared it — same human directive got re-injected into every subsequent strategic pass forever, and _check_human_steer would have infinite-looped any future phase-boundary trigger wiring", "fixed": true, "commit": "2b7e8ee", "halal": true, "tdd_verified": true}
+    {"n": 116, "summary": "CoachPlayer read STEER.md on every run but never cleared it — same human directive got re-injected into every subsequent strategic pass forever, and _check_human_steer would have infinite-looped any future phase-boundary trigger wiring", "fixed": true, "commit": "2b7e8ee", "halal": true, "tdd_verified": true},
+    {"n": 117, "summary": "Telegram _download_file 10MB cap bypassed when API response omitted file_size (`if file_size and ...` short-circuits); switched to fail-closed", "fixed": true, "commit": "36068e6", "halal": true, "tdd_verified": true},
+    {"n": 118, "summary": "UsageTracker.record_step incremented _total_tokens/_total_cost outside the _providers_lock — lost-update race across threads; moved scalars inside existing lock", "fixed": true, "commit": "f5b126a", "halal": true, "tdd_verified": true},
+    {"n": 119, "summary": "execute_phase never cleared STEER.md after applying it as context_hints — bug 107 auto-generated stuck-recovery text leaked into every subsequent task. Clear after apply, mirror of bug 116 consume-and-clear for Coach", "fixed": true, "commit": "743612d", "halal": true, "tdd_verified": true}
   ],
   "provider_switches": [],
   "investigations": [

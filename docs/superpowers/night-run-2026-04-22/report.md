@@ -14,9 +14,9 @@
 
 | Metric | Value |
 |---|---|
-| Bugs closed | **19** (numbered 98-116) |
-| Halal (tests cover the bug) | 19 / 19 |
-| TDD-verified (test seen to fail on broken code) | 7 / 19 (bugs 110-116) |
+| Bugs closed | **22** (numbered 98-119) |
+| Halal (tests cover the bug) | 22 / 22 |
+| TDD-verified (test seen to fail on broken code) | 10 / 22 (bugs 110-119) |
 | Green iterations on `easy-three.md` | **2** (iter-8 and iter-9, reproducible) |
 | Commits on branch | 21 |
 | Test suite | 1665 passing, 18 pre-existing failures (stream_bus + bug 8 dup) |
@@ -85,6 +85,9 @@ exercises. All three were written **test-first** per the TDD discipline.
 | 114 | `DiskLayer.read_plan` used `str.startswith` for path-traversal guard — accepted sibling directories that share a name prefix (`/tmp/proj-evil` resolves starting-with `/tmp/proj`). Real security bug (symlink or absolute path escape into sibling dir) | `74cae13` | 2/7 tests red before fix |
 | 115 | `config_writer.write_global_config_section` unlinked its own flock file in the `finally` block. Classic dual-lock race: after release+unlink, a later writer `O_CREAT`s a fresh inode and acquires flock on that while a prior writer still holds flock on the old inode. Two processes both believe they exclusively hold the lock | `9df277b` | 3/4 tests red before fix |
 | 116 | `CoachPlayer` read `.sora/human/STEER.md` on every run but never cleared it after folding the operator's directive into strategy docs. Same human steer kept leaking into every subsequent Coach pass, and `_check_human_steer` would infinite-loop on any future phase-boundary trigger wiring. Clear only on actual-doc-written success so a failed or empty-section run preserves the directive | `2b7e8ee` | 1/5 tests red before fix (other four regression-guards) |
+| 117 | `TelegramInputBot._download_file` 10 MB cap bypassed when the API response omitted `file_size` — `if file_size and ...` short-circuits to False. Switched to fail-closed (reject when missing OR oversized). Updated one pre-existing test to include file_size in its mock (matches real Telegram shape) | `36068e6` | 2/4 tests red before fix |
+| 118 | `UsageTracker.record_step` incremented `_total_tokens` and `_total_cost` outside the existing `_providers_lock`. `x += y` is LOAD/ADD/STORE — three bytecodes, not atomic under the GIL. Classic lost-update race. Moved scalars inside the same lock; no new lock, no API change. Wrong inline comment ("thread-safe via GIL for simple int/float arithmetic") deleted | `f5b126a` | 2/3 structural tests red before fix (behavioural was flaky-green on broken code) |
+| 119 | `execute_phase` re-read STEER.md at every task boundary and every attempt but never cleared it. The bug 107 auto-written "stuck-recovery option-N …" text (meant as a pause flag) kept leaking into every subsequent task's `context_hints`. Clear after applying — mirror of bug 116's consume-and-clear for Coach | `743612d` | 1/2 tests red before fix |
 
 ---
 
@@ -105,28 +108,18 @@ exercises. All three were written **test-first** per the TDD discipline.
 Explored but not landed under the deadline. Each is a defensible TDD candidate
 for the next session.
 
-1. **STEER.md never cleared after execute-phase reloads it** — bug 116 closed
-   the coach half of this (Coach now clears after success). Execute_phase
-   still re-reads STEER as `context_hints` on every attempt with no clear;
-   narrow fix blocked on distinguishing one-shot vs persistent operator
-   intent — punting to a future session.
-2. **`HUMAN_STEER` trigger is dead code** — `check_triggers()` is only called
+1. **`HUMAN_STEER` trigger is dead code** — `check_triggers()` is only called
    from `execute_phase`'s `verdict == ANOMALY` branch. Priority `STUCK > ANOMALY
    > HUMAN_STEER > BUDGET_60` means `_check_anomaly` always wins on that code
-   path, so `HUMAN_STEER` never fires. STEER.md still influences the builder
-   via `effective_hints` in `execute_phase`, but Coach is never invoked with
-   `HUMAN_STEER` as the trigger.
-3. **Telegram bot `/cmd@botname` rejected in group chats** — `_handle_command`
-   strips on whitespace only, so group-chat syntax gets "Unknown command". User
-   DMs the bot today; latent for group-chat use.
-4. **ContextAssembler ignores system_prompt tokens in budget** — per-section
+   path, so `HUMAN_STEER` never fires. Wiring it at task boundary would also
+   re-fire on stale EVENT_JOURNAL ANOMALY entries — that needs the journal
+   pruning fix first, so punting to a future session.
+2. **ContextAssembler ignores system_prompt tokens in budget** — per-section
    budget checks only count `mandatory_user`, not `system_prompt`. Final status
    can be `HARD_FAIL` without raising (returned on the result object). Big
    personas can silently push total over window without the section trimmer
    dropping them.
-5. **Telegram `_download_file`: missing `file_size` bypasses 10MB cap** —
-   defense-in-depth only (Telegram API always returns `file_size`).
-6. **Stuck-option full semantic wiring** — option 2 (rollback) needs checkpoint
+3. **Stuck-option full semantic wiring** — option 2 (rollback) needs checkpoint
    infrastructure that doesn't exist yet; options 1 and 4 are hint-only.
 
 ---
