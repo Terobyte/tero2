@@ -338,9 +338,18 @@ class TelegramInputBot:
             if not file_path:
                 return None
 
-            file_size = result.get("file_size", 0)
-            if file_size and file_size > self._MAX_FILE_SIZE:
-                log.warning("file too large (%d bytes), rejecting", file_size)
+            # Bug 117: reject when file_size is missing or zero. Telegram's
+            # getFile response reliably includes file_size for legitimate
+            # files; its absence means the response is anomalous and we
+            # cannot enforce the 10 MB cap, so the defense-in-depth guard
+            # has to fail closed.
+            file_size = result.get("file_size")
+            if not file_size or file_size > self._MAX_FILE_SIZE:
+                log.warning(
+                    "file rejected (size=%r, cap=%d)",
+                    file_size,
+                    self._MAX_FILE_SIZE,
+                )
                 return None
 
             download_url = (

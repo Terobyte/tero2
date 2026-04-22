@@ -394,7 +394,11 @@ class TestDownloadFile:
         bot = _make_bot(config)
 
         mock_resp_get_file = MagicMock()
-        mock_resp_get_file.json.return_value = {"result": {"file_path": "documents/file.md"}}
+        # Bug 117: real Telegram responses always carry file_size; include it
+        # so the defense-in-depth guard lets the download through.
+        mock_resp_get_file.json.return_value = {
+            "result": {"file_path": "documents/file.md", "file_size": 42}
+        }
         mock_resp_get_file.raise_for_status = MagicMock()
 
         mock_resp_download = MagicMock()
