@@ -86,9 +86,22 @@ class TestBug57PhaseOrderSingleSource:
 
 
 class TestBug66CompletedExistsCheck:
-    """Crash-recovery must NOT add a task to completed if SUMMARY.md is missing."""
+    """Crash-recovery must NOT add a task to completed without confirming work.
 
-    async def test_missing_summary_not_in_completed(self, tmp_path):
+    Bug 66 forbids phantom ``completed`` entries: if a task is "skipped" because
+    start_index advanced past it, we MUST either (a) see a real ``*-SUMMARY.md``
+    on disk before trusting the skip, or (b) actually re-run the task through
+    the builder. What we MUST NOT do is add a task to ``completed`` with a
+    fabricated or inherited path when neither condition holds.
+
+    Post-bug-102 contract: path (b) now re-runs instead of hard-failing. The
+    spirit of bug 66 — no phantom completions — is preserved because the only
+    way ``completed[task]`` gets populated is from a real builder invocation.
+    """
+
+    async def test_skipped_task_without_summary_reruns_through_builder(
+        self, tmp_path
+    ):
         from tero2.checkpoint import CheckpointManager
         from tero2.circuit_breaker import CircuitBreakerRegistry
         from tero2.config import Config, ReflexionConfig, RoleConfig, TelegramConfig
@@ -114,7 +127,6 @@ class TestBug66CompletedExistsCheck:
 
         # Crash recovery: current_task_index=1 means T01 is "done", T02 needs to run.
         # But the T01-SUMMARY.md was never written to disk (process crashed before it).
-        # sora_phase=ARCHITECT so the ARCHITECT→EXECUTE transition is valid when T02 runs.
         state = AgentState(
             current_task_index=1,
             task_in_progress=False,
@@ -128,7 +140,7 @@ class TestBug66CompletedExistsCheck:
         from tero2.players.builder import BuilderResult
 
         tasks = [
-            Task(id="T01", description="already done (no summary on disk)"),
+            Task(id="T01", description="state says done but no summary on disk"),
             Task(id="T02", description="runs now"),
         ]
         slice_plan = SlicePlan(
@@ -137,27 +149,69 @@ class TestBug66CompletedExistsCheck:
             tasks=tasks,
         )
 
-        with patch("tero2.phases.execute_phase.BuilderPlayer") as MockB:
+        calls: list[str] = []
+
+        def _builder_factory(*args, **kwargs):
             inst = MagicMock()
-            inst.run = AsyncMock(
-                return_value=BuilderResult(
+
+            async def _run(**kw):
+                tid = kw.get("task_id", "?")
+                calls.append(tid)
+                return BuilderResult(
                     success=True,
-                    output_file="milestones/M001/S01/T02-SUMMARY.md",
+                    output_file=f"milestones/M001/S01/{tid}-SUMMARY.md",
                     captured_output="done",
+                    summary=f"# {tid}\nok",
                 )
-            )
-            MockB.return_value = inst
+
+            inst.run = AsyncMock(side_effect=_run)
+            return inst
+
+        with patch("tero2.phases.execute_phase.BuilderPlayer", side_effect=_builder_factory):
             result = await run_execute(ctx, slice_plan)
 
+        # Spirit of bug 66: every entry in `completed` must come from either a
+        # real summary on disk (skip path) or a real builder invocation (re-run
+        # path). Since T01's summary is missing, the only legitimate way T01
+        # can end up in `completed` is by being actually re-run.
+        assert "T01" in calls, (
+            "bug 66 invariant: T01 had no summary on disk, so it must be re-run "
+            f"through the builder before being marked complete. calls={calls!r}"
+        )
         completed = result.data["completed"]
-        assert "T01" not in completed, (
-            f"T01 SUMMARY.md does not exist on disk; must not appear in completed. "
-            f"Got completed={completed}"
+        assert completed["T01"] == "milestones/M001/S01/T01-SUMMARY.md", (
+            "T01's completed path must come from its own builder run — never "
+            f"inherited or fabricated. got: {completed!r}"
         )
-        assert "T02" in completed, "T02 ran and passed — must be in completed"
-        assert result.success is False, (
-            "A skipped task with a missing summary must cause the run to fail"
+        assert completed["T02"] == "milestones/M001/S01/T02-SUMMARY.md"
+        assert result.success, (
+            "after re-running T01 and running T02 the slice must succeed"
         )
+
+    async def test_completed_entry_requires_real_source(self, tmp_path):
+        """Direct regression: no task is ever written to `completed` based on
+        an inferred/fabricated path when neither the on-disk summary exists nor
+        a builder result has been produced for it. Enforced by construction —
+        the only writers to `completed` are (1) the verified-summary skip path
+        and (2) the post-builder success path.
+        """
+        import inspect
+        import re
+
+        from tero2.phases import execute_phase as ep_mod
+
+        src = inspect.getsource(ep_mod.run_execute)
+        # Every occurrence of `completed[...] = ...` in run_execute must be
+        # gated by either an exists()-verified summary or a builder result.
+        writes = re.findall(r"completed\[[^\]]+\]\s*=\s*[^\n]+", src)
+        assert writes, "sanity: run_execute must write to `completed` somewhere"
+        for w in writes:
+            # The only acceptable RHS shapes are:
+            #   - summary_path  (gated by exists() check above it)
+            #   - builder_result.output_file  (gated by builder success)
+            assert "summary_path" in w or "builder_result.output_file" in w, (
+                f"bug 66 regression risk: suspicious `completed` write: {w!r}"
+            )
 
 
 # ── Bug 70: resolve().is_relative_to(project_path) guard ─────────────────
