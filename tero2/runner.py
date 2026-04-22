@@ -44,6 +44,39 @@ log = logging.getLogger(__name__)
 
 _IDLE_POLL_S = 60.0
 
+# TUI stuck-dialog option → STEER.md hint.  Each option was an opaque code
+# (stuck_option_N) until bug 107; now the runner translates into a concrete
+# instruction the next attempt reads as effective_hints.  Option 5 ALSO
+# triggers mark_paused + Telegram notify at the call site.
+_STUCK_OPTION_HINTS: dict[str, str] = {
+    "stuck_option_1": (
+        "[stuck-recovery option-1 temp-up] The operator asked you to broaden "
+        "exploration: try unusual angles, avoid repeating the same approach, "
+        "and consider solutions you would normally discard as unlikely."
+    ),
+    "stuck_option_2": (
+        "[stuck-recovery option-2 rollback] The operator suspects the recent "
+        "direction was wrong. Reconsider the last 2–3 decisions, question the "
+        "assumptions behind them, and resume from the last point you were "
+        "confident about."
+    ),
+    "stuck_option_3": (
+        "[stuck-recovery option-3 diversify] ⚠️ Previous approach hit a dead "
+        "end. Try a completely different strategy to accomplish the task."
+    ),
+    "stuck_option_4": (
+        "[stuck-recovery option-4 coach] The operator requested a deep review. "
+        "Walk through the full approach systematically: list each step you "
+        "took, state the assumption behind each step, verify it is still "
+        "valid, and surface any that are uncertain."
+    ),
+    "stuck_option_5": (
+        "[stuck-recovery option-5 human-pause] The operator has paused this "
+        "run. Do not continue until STEER.md / OVERRIDE.md receives new "
+        "guidance."
+    ),
+}
+
 
 _PHASE_ORDER = SORA_PHASE_ORDER
 
@@ -256,14 +289,36 @@ class Runner:
                     log.warning("runner: steer command with empty text — ignoring")
                     continue
                 if text.startswith("stuck_option_"):
-                    # stuck_option_N is an opaque code produced by the stuck
-                    # dialog — each option means a different recovery action
-                    # (temp-up, rollback, diversify, coach, human escalation)
-                    # and those semantics live in the escalation subsystem.
-                    # Marshal through STEER.md so execute_phase picks it up on
-                    # the next attempt boundary and treats it as a human hint.
-                    self.disk.write_steer(f"[stuck-option] {text}")
-                    log.info("runner: stuck option %s persisted to STEER.md", text)
+                    # Translate opaque stuck-dialog codes into concrete hints
+                    # the next attempt can act on (STEER.md is read at every
+                    # attempt boundary in execute_phase).
+                    translated = _STUCK_OPTION_HINTS.get(text)
+                    if translated is None:
+                        log.warning(
+                            "runner: unknown stuck option code %r — persisting raw",
+                            text,
+                        )
+                        self.disk.write_steer(f"[stuck-option] {text}")
+                    else:
+                        self.disk.write_steer(translated)
+                        log.info(
+                            "runner: stuck option %s → hint persisted to STEER.md",
+                            text,
+                        )
+                        # Option 5 = "Эскалация к человеку": halt the slice
+                        # the same way an OVERRIDE.md PAUSE would.
+                        if text == "stuck_option_5":
+                            state = self.checkpoint.mark_paused(
+                                state,
+                                f"paused via stuck-option-5 from {cmd.source or 'command'}",
+                            )
+                            self._current_state = state
+                            with suppress(Exception):
+                                await self.notifier.notify(
+                                    "Пауза по эскалации — ждём STEER/OVERRIDE",
+                                    NotifyLevel.ERROR,
+                                )
+                            return state, False
                 else:
                     self.disk.write_steer(text)
                     log.info(

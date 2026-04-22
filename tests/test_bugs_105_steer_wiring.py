@@ -114,9 +114,16 @@ class TestFreeFormSteerPersistsToSteerMd:
 class TestStuckOptionCodesMarshalledThroughSteerMd:
     """Stuck-dialog options 1..5 reach the human-hint channel too, but tagged
     so downstream consumers (or the operator reading STEER.md) can tell they
-    came from the stuck dialog rather than a free-form hint."""
+    came from the stuck dialog rather than a free-form hint.
 
-    async def test_stuck_option_1_prefixed(self, tmp_path: Path) -> None:
+    Bug 107 upgraded the codes from opaque ``stuck_option_N`` markers to
+    concrete instructions the agent can act on (see ``_STUCK_OPTION_HINTS``
+    in ``tero2/runner.py``). These tests pin the tagging contract — each
+    written hint must carry the option number so it's traceable back to the
+    stuck dialog.
+    """
+
+    async def test_stuck_option_1_tagged(self, tmp_path: Path) -> None:
         runner, cq = _make_runner(tmp_path)
         cq.put_nowait(
             Command("steer", data={"text": "stuck_option_1"}, source="tui")
@@ -124,26 +131,46 @@ class TestStuckOptionCodesMarshalledThroughSteerMd:
         await runner._drain_commands(_running_state())
 
         content = runner.disk.read_steer()
-        assert content.startswith("[stuck-option]"), (
-            f"stuck-option payloads must be tagged so they can be distinguished "
-            f"from free-form hints. got: {content!r}"
+        assert "[stuck-recovery option-1" in content, (
+            f"stuck option 1 must be tagged with option-1 marker. got: {content!r}"
         )
-        assert "stuck_option_1" in content
+        # hint must be more than just the code — it must contain English
+        # direction that the next attempt can act on.
+        assert len(content) > 60, (
+            f"bug 107: opaque codes must be translated into meaningful hints, "
+            f"got short: {content!r}"
+        )
 
-    async def test_each_stuck_option_surfaces_code(self, tmp_path: Path) -> None:
-        runner, cq = _make_runner(tmp_path)
+    async def test_each_stuck_option_tagged_distinctly(self, tmp_path: Path) -> None:
+        """Every option produces a distinct hint with its own tag — no two
+        options collide on the same translated text."""
+        from tero2.runner import _STUCK_OPTION_HINTS
+
+        seen = set()
         for n in range(1, 6):
+            sub = tmp_path / f"p{n}"
+            sub.mkdir()
+            runner, cq = _make_runner(sub)
             cq.put_nowait(
                 Command(
                     "steer", data={"text": f"stuck_option_{n}"}, source="tui"
                 )
             )
+            await runner._drain_commands(_running_state())
+            content = runner.disk.read_steer()
+            assert f"option-{n}" in content, (
+                f"stuck_option_{n} hint must name its option number. "
+                f"got: {content!r}"
+            )
+            seen.add(content)
 
-        await runner._drain_commands(_running_state())
-
-        # Last one wins (current slot semantics) — verify it's tagged.
-        content = runner.disk.read_steer()
-        assert content == "[stuck-option] stuck_option_5"
+        assert len(seen) == 5, (
+            "all 5 stuck options must produce distinct hints, not the same text"
+        )
+        # Also: the module mapping must have exactly the 5 keys we expect.
+        assert set(_STUCK_OPTION_HINTS.keys()) == {
+            f"stuck_option_{n}" for n in range(1, 6)
+        }
 
 
 class TestDiskLayerWriteSteerApi:
