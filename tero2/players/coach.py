@@ -82,6 +82,14 @@ class CoachPlayer(BasePlayer):
             if context_hints:
                 self.disk.write_file("strategic/CONTEXT_HINTS.md", context_hints)
 
+            # Bug 116: clear STEER.md only when we actually folded it into a
+            # strategy document. A successful parse with zero sections means
+            # nothing was applied, so the operator's directive must survive
+            # for the next attempt.
+            wrote_any = any([strategy, task_queue, risk, context_hints])
+            if wrote_any and self.disk.read_steer():
+                self.disk.clear_steer()
+
             return CoachResult(
                 success=True,
                 output_file="strategic/STRATEGY.md",
