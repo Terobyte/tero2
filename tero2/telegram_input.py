@@ -171,8 +171,14 @@ class TelegramInputBot:
         )
 
     async def _handle_command(self, text: str, chat_id: str) -> None:
-        """Handle slash commands: /status, /stop, /pause."""
-        command = text.strip().split()[0].lower()
+        """Handle slash commands: /status, /stop, /pause.
+
+        In group chats and any chat with more than one bot, Telegram appends
+        ``@<bot_username>`` to the command so it is routed only to the
+        intended bot. Strip that suffix before matching so ``/stop@tero2_bot``
+        behaves identically to ``/stop``. Usernames are case-insensitive.
+        """
+        command = text.strip().split()[0].lower().split("@", 1)[0]
 
         if command == "/status":
             status = "paused" if self._paused else ("running" if self._running else "stopped")
