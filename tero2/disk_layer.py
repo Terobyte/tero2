@@ -48,7 +48,11 @@ class DiskLayer:
             return (self.sora_dir / relative_path).read_text(encoding="utf-8")
         except FileNotFoundError:
             return None
-        except OSError:
+        except (OSError, UnicodeDecodeError):
+            # Bug 121: UnicodeDecodeError is a ValueError, not an OSError,
+            # so operator-written files (STEER.md, OVERRIDE.md, PROJECT.md)
+            # saved in cp1252/latin-1 crashed the runner. Treat the same as
+            # OSError — degrade to empty string.
             return ""
 
     def write_file(self, relative_path: str, content: str) -> bool:
