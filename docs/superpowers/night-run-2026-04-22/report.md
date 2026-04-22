@@ -14,9 +14,9 @@
 
 | Metric | Value |
 |---|---|
-| Bugs closed | **18** (numbered 98-115) |
-| Halal (tests cover the bug) | 18 / 18 |
-| TDD-verified (test seen to fail on broken code) | 6 / 18 (bugs 110-115) |
+| Bugs closed | **19** (numbered 98-116) |
+| Halal (tests cover the bug) | 19 / 19 |
+| TDD-verified (test seen to fail on broken code) | 7 / 19 (bugs 110-116) |
 | Green iterations on `easy-three.md` | **2** (iter-8 and iter-9, reproducible) |
 | Commits on branch | 21 |
 | Test suite | 1665 passing, 18 pre-existing failures (stream_bus + bug 8 dup) |
@@ -84,6 +84,7 @@ exercises. All three were written **test-first** per the TDD discipline.
 | 113 | `TelegramInputBot._handle_command` silently rejected group-chat `/cmd@botname` syntax as "Unknown command" — Telegram appends `@<bot_username>` in any chat with multiple bots | `730d7e5` | 6/10 tests red before fix |
 | 114 | `DiskLayer.read_plan` used `str.startswith` for path-traversal guard — accepted sibling directories that share a name prefix (`/tmp/proj-evil` resolves starting-with `/tmp/proj`). Real security bug (symlink or absolute path escape into sibling dir) | `74cae13` | 2/7 tests red before fix |
 | 115 | `config_writer.write_global_config_section` unlinked its own flock file in the `finally` block. Classic dual-lock race: after release+unlink, a later writer `O_CREAT`s a fresh inode and acquires flock on that while a prior writer still holds flock on the old inode. Two processes both believe they exclusively hold the lock | `9df277b` | 3/4 tests red before fix |
+| 116 | `CoachPlayer` read `.sora/human/STEER.md` on every run but never cleared it after folding the operator's directive into strategy docs. Same human steer kept leaking into every subsequent Coach pass, and `_check_human_steer` would infinite-loop on any future phase-boundary trigger wiring. Clear only on actual-doc-written success so a failed or empty-section run preserves the directive | `2b7e8ee` | 1/5 tests red before fix (other four regression-guards) |
 
 ---
 
@@ -104,11 +105,11 @@ exercises. All three were written **test-first** per the TDD discipline.
 Explored but not landed under the deadline. Each is a defensible TDD candidate
 for the next session.
 
-1. **STEER.md never cleared** — once written (by TUI automation or human),
-   `execute_phase` re-reads it as `context_hints` every attempt forever. Bug
-   105/106/107 automation writes "option N" hints that then pollute subsequent
-   task context. `disk.clear_steer()` exists and is tested at the disk layer
-   but has no production callers.
+1. **STEER.md never cleared after execute-phase reloads it** — bug 116 closed
+   the coach half of this (Coach now clears after success). Execute_phase
+   still re-reads STEER as `context_hints` on every attempt with no clear;
+   narrow fix blocked on distinguishing one-shot vs persistent operator
+   intent — punting to a future session.
 2. **`HUMAN_STEER` trigger is dead code** — `check_triggers()` is only called
    from `execute_phase`'s `verdict == ANOMALY` branch. Priority `STUCK > ANOMALY
    > HUMAN_STEER > BUDGET_60` means `_check_anomaly` always wins on that code
