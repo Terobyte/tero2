@@ -15,7 +15,10 @@
     {"n": 106, "summary": "TUI skip_task ('k') posted to queue but nothing consumed mid-slice; now drained per-attempt, soft-passes with placeholder SUMMARY.md", "fixed": true, "commit": "98bb582", "halal": true},
     {"n": 107, "summary": "stuck_option_1..5 were opaque codes in STEER.md; now translated to actionable hints and option 5 triggers mark_paused + Telegram notify", "fixed": true, "commit": "38682ca", "halal": true},
     {"n": 108, "summary": "TUI new_plan ('l') mid-execution was silently dropped; now aborts current plan (FAILED) + re-queues for _idle_loop", "fixed": true, "commit": "c38e02a", "halal": true},
-    {"n": 109, "summary": "pause/stop had no dispatcher event (invisible in TUI); no way to resume once paused (TUI only had 'p' binding)", "fixed": true, "commit": "1ed1de3", "halal": true}
+    {"n": 109, "summary": "pause/stop had no dispatcher event (invisible in TUI); no way to resume once paused (TUI only had 'p' binding)", "fixed": true, "commit": "1ed1de3", "halal": true},
+    {"n": 110, "summary": "AgentState.from_file crashed runner on startup when STATE.json was corrupted (ValueError from from_json never caught)", "fixed": true, "commit": "41197eb", "halal": true, "tdd_verified": true},
+    {"n": 111, "summary": "mark_started preserved stale error_message from prior FAILED/PAUSED run — tero2 status showed old error text on fresh run", "fixed": true, "commit": "58a2355", "halal": true, "tdd_verified": true},
+    {"n": 112, "summary": "PersonaRegistry used CWD-relative .sora/prompts/ path — project-local persona overrides invisible when tero2 launched from different directory", "fixed": true, "commit": "2311150", "halal": true, "tdd_verified": true}
   ],
   "provider_switches": [],
   "investigations": [
