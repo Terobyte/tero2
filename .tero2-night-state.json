@@ -12,7 +12,9 @@
     {"n": 103, "summary": "verifier ran backticked identifiers/filepaths as commands (Permission denied on stringy/utils.py)", "fixed": true, "commit": "942cf62", "halal": true},
     {"n": 104, "summary": "runner silently dropped unhandled TUI commands (skip_task/steer/new_project)", "fixed": true, "commit": "1c37d25", "halal": true},
     {"n": 105, "summary": "TUI steer (SteerScreen + stuck_option_1..5) posted to queue but runner had no handler; now persisted to STEER.md", "fixed": true, "commit": "98bb582", "halal": true},
-    {"n": 106, "summary": "TUI skip_task ('k') posted to queue but nothing consumed mid-slice; now drained per-attempt, soft-passes with placeholder SUMMARY.md", "fixed": true, "commit": "98bb582", "halal": true}
+    {"n": 106, "summary": "TUI skip_task ('k') posted to queue but nothing consumed mid-slice; now drained per-attempt, soft-passes with placeholder SUMMARY.md", "fixed": true, "commit": "98bb582", "halal": true},
+    {"n": 107, "summary": "stuck_option_1..5 were opaque codes in STEER.md; now translated to actionable hints and option 5 triggers mark_paused + Telegram notify", "fixed": true, "commit": "38682ca", "halal": true},
+    {"n": 108, "summary": "TUI new_plan ('l') mid-execution was silently dropped; now aborts current plan (FAILED) + re-queues for _idle_loop", "fixed": true, "commit": "c38e02a", "halal": true}
   ],
   "provider_switches": [],
   "investigations": [
@@ -30,6 +32,7 @@
   "budget_hours": 10,
   "launch_command": "cd /tmp && PYTHONPATH=<worktree> tero2 run <testbed> --plan easy-three.md --verbose",
   "iter_8_outcome": "GREEN 3/3 — all 6 bug fixes (98-103) worked in cascade: chain logged per-attempt, architect recovered plan, builder synthesized placeholder 3x, verifier ran only real pytest commands. Testbed ended with 3 commits, 11 passing tests.",
+  "iter_9_outcome": "GREEN 3/3 — reproducibility confirmed after bugs 104-108 wiring. Runtime ~7 minutes, harden_malformed open-observation still fires but degrades cleanly as before.",
   "next_action": "iter-9 sanity check, then transition to Phase A (TUI) for remaining budget (~6h)",
   "bug_66_aligned": "40349bb — bug 102 fix changed skip-with-missing-summary from fail-hard to re-run; bug 66's test updated to assert new contract (spirit preserved: no phantom completed entries)."
 }
