@@ -14,9 +14,9 @@
 
 | Metric | Value |
 |---|---|
-| Bugs closed | **23** (numbered 98-120) |
-| Halal (tests cover the bug) | 23 / 23 |
-| TDD-verified (test seen to fail on broken code) | 11 / 23 (bugs 110-120) |
+| Bugs closed | **24** (numbered 98-121) |
+| Halal (tests cover the bug) | 24 / 24 |
+| TDD-verified (test seen to fail on broken code) | 12 / 24 (bugs 110-121) |
 | Green iterations on `easy-three.md` | **2** (iter-8 and iter-9, reproducible) |
 | Commits on branch | 21 |
 | Test suite | 1665 passing, 18 pre-existing failures (stream_bus + bug 8 dup) |
@@ -89,6 +89,7 @@ exercises. All three were written **test-first** per the TDD discipline.
 | 118 | `UsageTracker.record_step` incremented `_total_tokens` and `_total_cost` outside the existing `_providers_lock`. `x += y` is LOAD/ADD/STORE — three bytecodes, not atomic under the GIL. Classic lost-update race. Moved scalars inside the same lock; no new lock, no API change. Wrong inline comment ("thread-safe via GIL for simple int/float arithmetic") deleted | `f5b126a` | 2/3 structural tests red before fix (behavioural was flaky-green on broken code) |
 | 119 | `execute_phase` re-read STEER.md at every task boundary and every attempt but never cleared it. The bug 107 auto-written "stuck-recovery option-N …" text (meant as a pause flag) kept leaking into every subsequent task's `context_hints`. Clear after applying — mirror of bug 116's consume-and-clear for Coach | `743612d` | 1/2 tests red before fix |
 | 120 | `_extract_list` used `re.IGNORECASE` with `$`+MULTILINE, so pytest's lowercase summary line `N failed in Xs` matched the same pattern as real `FAILED tests/…` lines. Garbage like `in 0.5s =====` leaked into `failed_tests`, then into reflexion prompts as a "specific test name that failed", corrupting the LLM's fix-guidance. Dropped IGNORECASE — pytest convention distinguishes uppercase result lines from lowercase summary | `72c70b9` | 2/4 tests red before fix |
+| 121 | `DiskLayer.read_file` caught `FileNotFoundError` and `OSError` but not `UnicodeDecodeError` (a `ValueError` subclass, not `OSError`). Operator-written files (`human/STEER.md`, `human/OVERRIDE.md`, `persistent/PROJECT.md`) saved in cp1252/latin-1 would propagate the exception out, crashing a long-running runner. Added to except tuple — degrade to `""` like other unreadable files | `127f54f` | 3/5 tests red before fix |
 
 ---
 
