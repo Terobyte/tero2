@@ -163,9 +163,41 @@ for the next session.
 
 ## Deliverables
 
-- 21 commits on `claude/nifty-hermann-d3480c`.
-- 15 new test files under `tests/` (one per bug + `test_state.py` update for
-  bug 110 contract change).
+- **35** commits on `claude/nifty-hermann-d3480c`.
+- **26** new test files under `tests/` (one per bug) + `test_state.py` and
+  A24 contract-realignment updates for bugs 110/115.
 - Journal at `.tero2-night-state.json` with full bug list, investigations,
   and iter outcomes.
 - This report.
+
+### Final test suite state (16:15 EDT, stop = 17:10)
+
+- **1747 passed / 18 failed / 1 skipped** — the 18 failures are the
+  pre-existing `stream_bus` + bug-8-duplicate set on `main`, unchanged
+  by this branch. Zero new regressions introduced.
+- `tests/test_bugs_{98..123}*.py` landed; bugs 110-123 are all TDD-verified
+  (red-before-fix seen by hand or by the test author).
+
+### Bug-class summary
+
+- **Runtime cascade (98-103):** six sequential blockers on the clean
+  `easy-three.md` pipeline — found by running iterations until the next
+  blocker surfaced.
+- **TUI wiring (104-109):** the command queue had plumbing but no
+  consumer for half its kinds. Closed all six.
+- **Test-first / code-read reliability (110-112, 116, 119):** state
+  corruption, stale error messages, CWD-relative path resolution,
+  consume-and-clear patterns for STEER.md in both Coach and
+  execute_phase.
+- **Security / correctness (113-115, 117):** group-chat `/cmd@botname`
+  handling, sibling-dir path traversal, config-writer lock-file race,
+  Telegram `file_size` bypass.
+- **Concurrency (118, 122):** `UsageTracker` write-side race (`x += y`
+  under GIL is three bytecodes), then the matching read-side race on the
+  provider dict.
+- **Regex + encoding drive-bys (120, 121, 123):** IGNORECASE leaking
+  pytest summary lines into `failed_tests`; `UnicodeDecodeError` escaping
+  two disk-read paths.
+
+No provider switches were needed — the chain remained stable throughout
+both phases.
