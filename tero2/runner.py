@@ -259,10 +259,28 @@ class Runner:
                     state, f"stopped via {cmd.source or 'command'}"
                 )
                 self._current_state = state
+                if self._dispatcher is not None:
+                    await self._dispatcher.emit(
+                        make_event(
+                            "error",
+                            role="runner",
+                            data={"message": f"Остановлено через {cmd.source or 'команду'}"},
+                            priority=True,
+                        )
+                    )
                 return state, False
             if cmd.kind == "pause":
                 state = self.checkpoint.mark_paused(state, f"paused via {cmd.source or 'command'}")
                 self._current_state = state
+                if self._dispatcher is not None:
+                    await self._dispatcher.emit(
+                        make_event(
+                            "error",  # shown in red in the log — visible pause indicator
+                            role="runner",
+                            data={"message": f"Пауза через {cmd.source or 'команду'} — runner ушёл в idle"},
+                            priority=True,
+                        )
+                    )
                 return state, False
             if cmd.kind == "switch_provider":
                 role = cmd.data.get("role", "")
@@ -844,6 +862,39 @@ class Runner:
                 await self._execute_plan(new_state, shutdown_event)
                 # Reset elapsed after each plan execution to restart the idle timer
                 elapsed = 0.0
+                continue
+
+            # Pause-as-toggle: when the runner is idle because of a previous
+            # pause, pressing 'p' in the TUI again means "resume". The TUI only
+            # has one binding for both directions.
+            if cmd.kind in ("pause", "resume"):
+                state = self.checkpoint.restore()
+                if state.phase == Phase.PAUSED and self.plan_file is not None:
+                    log.info(
+                        "idle: %s command while PAUSED — resuming execution",
+                        cmd.kind,
+                    )
+                    state = self.checkpoint.mark_running(state)
+                    self._current_state = state
+                    await self.notifier.notify("resumed", NotifyLevel.PROGRESS)
+                    if self._dispatcher is not None:
+                        await self._dispatcher.emit(
+                            make_event(
+                                "phase_change",
+                                role="runner",
+                                data={"sora_phase": state.sora_phase.value},
+                                priority=True,
+                            )
+                        )
+                    await self._execute_plan(state, shutdown_event)
+                    elapsed = 0.0
+                else:
+                    log.warning(
+                        "idle: %s command ignored — state is %s, not PAUSED "
+                        "(or no plan loaded)",
+                        cmd.kind,
+                        state.phase.value,
+                    )
                 continue
 
             log.warning(
