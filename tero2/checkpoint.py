@@ -53,6 +53,10 @@ class CheckpointManager:
         else:
             state = AgentState()
         state = self._transition(state, Phase.RUNNING)
+        # Clear any stale error_message left over from a previous FAILED or
+        # PAUSED phase — the run is starting fresh, the old reason no longer
+        # applies, and `tero2 status` would otherwise show the old text.
+        state.error_message = ""
         state.plan_file = str(plan_file)
         state.started_at = datetime.now(timezone.utc).isoformat()
         state = self.save(state)
