@@ -18,7 +18,10 @@
     {"n": 109, "summary": "pause/stop had no dispatcher event (invisible in TUI); no way to resume once paused (TUI only had 'p' binding)", "fixed": true, "commit": "1ed1de3", "halal": true},
     {"n": 110, "summary": "AgentState.from_file crashed runner on startup when STATE.json was corrupted (ValueError from from_json never caught)", "fixed": true, "commit": "41197eb", "halal": true, "tdd_verified": true},
     {"n": 111, "summary": "mark_started preserved stale error_message from prior FAILED/PAUSED run — tero2 status showed old error text on fresh run", "fixed": true, "commit": "58a2355", "halal": true, "tdd_verified": true},
-    {"n": 112, "summary": "PersonaRegistry used CWD-relative .sora/prompts/ path — project-local persona overrides invisible when tero2 launched from different directory", "fixed": true, "commit": "2311150", "halal": true, "tdd_verified": true}
+    {"n": 112, "summary": "PersonaRegistry used CWD-relative .sora/prompts/ path — project-local persona overrides invisible when tero2 launched from different directory", "fixed": true, "commit": "2311150", "halal": true, "tdd_verified": true},
+    {"n": 113, "summary": "Telegram bot /cmd@botname (group-chat syntax) silently rejected as unknown command", "fixed": true, "commit": "730d7e5", "halal": true, "tdd_verified": true},
+    {"n": 114, "summary": "DiskLayer.read_plan used str.startswith for path-traversal check — accepted sibling directories sharing a name prefix (/proj vs /proj-evil)", "fixed": true, "commit": "74cae13", "halal": true, "tdd_verified": true},
+    {"n": 115, "summary": "config_writer.write_global_config_section unlinked its flock file in finally — creates dual-lock race where two processes hold flock on different inodes", "fixed": true, "commit": "9df277b", "halal": true, "tdd_verified": true}
   ],
   "provider_switches": [],
   "investigations": [
@@ -38,5 +41,10 @@
   "iter_8_outcome": "GREEN 3/3 — all 6 bug fixes (98-103) worked in cascade: chain logged per-attempt, architect recovered plan, builder synthesized placeholder 3x, verifier ran only real pytest commands. Testbed ended with 3 commits, 11 passing tests.",
   "iter_9_outcome": "GREEN 3/3 — reproducibility confirmed after bugs 104-108 wiring. Runtime ~7 minutes, harden_malformed open-observation still fires but degrades cleanly as before.",
   "next_action": "iter-9 sanity check, then transition to Phase A (TUI) for remaining budget (~6h)",
+  "post_phase_b_bugs": {
+    "description": "Three TDD-first bugs found by code-reading after iter-9 green",
+    "bugs": [113, 114, 115],
+    "common_pattern": "quiet correctness/security issues that the green headless run never exercised: group-chat telegram syntax, sibling-dir path traversal, lock-file unlink race"
+  },
   "bug_66_aligned": "40349bb — bug 102 fix changed skip-with-missing-summary from fail-hard to re-run; bug 66's test updated to assert new contract (spirit preserved: no phantom completed entries)."
 }
