@@ -17,6 +17,19 @@ _CACHE_DIR = Path.home() / ".tero2" / "cache"
 _CACHE_TTL_S = 3600  # 1 hour
 
 
+def _cleanup_orphaned_tmp() -> None:
+    if not _CACHE_DIR.is_dir():
+        return
+    for tmp in _CACHE_DIR.glob("*.tmp"):
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+_cleanup_orphaned_tmp()
+
+
 @dataclass(frozen=True)
 class ModelEntry:
     id: str
@@ -93,11 +106,8 @@ async def fetch_cli_models(
         if proc is not None and proc.returncode is None:
             try:
                 proc.kill()
-            except ProcessLookupError:
-                pass
-            try:
                 await proc.wait()
-            except Exception:
+            except (ProcessLookupError, OSError):
                 pass
         log.warning("fetch_cli_models(%s) failed: %s — using static fallback", cli_name, e)
         return STATIC_CATALOG.get(cli_name, [])
@@ -116,7 +126,7 @@ def _load_cache(cli: str) -> list[ModelEntry] | None:
         raw = json.loads(p.read_text(encoding="utf-8"))
         fetched_at = datetime.fromisoformat(raw["fetched_at"])
         if fetched_at.tzinfo is None:
-            fetched_at = fetched_at.replace(tzinfo=timezone.utc)
+            return None
         age = (datetime.now(timezone.utc) - fetched_at).total_seconds()
         if age > _CACHE_TTL_S:
             return None
@@ -134,8 +144,14 @@ def _save_cache(cli: str, entries: list[ModelEntry]) -> None:
             "entries": [{"id": e.id, "label": e.label} for e in entries],
         }
         tmp = p.with_name(f"{p.stem}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(p)
+        try:
+            tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            tmp.replace(p)
+        finally:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
     except OSError as e:
         log.warning("cache write failed for %s: %s", cli, e)
 

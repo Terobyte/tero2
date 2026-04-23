@@ -31,6 +31,7 @@ from tero2.players.architect import SlicePlan, _parse_slice_plan
 from tero2.providers.chain import ProviderChain, _is_recoverable_error
 from tero2.providers.registry import create_provider
 from tero2.state import AgentState
+from tero2.stream_bus import StreamBus
 from tero2.stuck_detection import StuckSignal, check_stuck, update_tool_hash
 
 log = logging.getLogger(__name__)
@@ -80,6 +81,7 @@ class RunnerContext:
     shutdown_event: asyncio.Event | None = None
     dispatcher: EventDispatcher | None = None
     command_queue: asyncio.Queue | None = None
+    stream_bus: StreamBus | None = None
     escalation_level: EscalationLevel = EscalationLevel.NONE
     div_steps: int = 0
     escalation_history: list[EscalationLevel] = field(default_factory=list)
@@ -170,7 +172,7 @@ class RunnerContext:
         state_ref: list[AgentState] = [state]
         captured_parts: list[str] = []
 
-        heartbeat_task = asyncio.create_task(self._heartbeat_loop(state_ref))
+        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop(state_ref))
         try:
             role_cfg = self.config.roles.get(role)
             timeout_s = role_cfg.timeout_s if role_cfg else HARD_TIMEOUT_S
@@ -193,6 +195,16 @@ class RunnerContext:
                         )
                     if text_content:
                         captured_parts.append(text_content)
+
+                    if self.stream_bus is not None:
+                        from tero2.providers.normalizers import get_normalizer
+                        provider_kind = getattr(chain, "provider_kind", "fallback")
+                        normalizer = get_normalizer(provider_kind)
+                        for event in normalizer.normalize(message, role=role):
+                            self.stream_bus.publish(event)
+                            if not text_content and event.kind == "text" and event.content:
+                                captured_parts.append(event.content)
+                                text_content = event.content
 
                     msg_type = getattr(message, "type", None) or (
                         message.get("type") if isinstance(message, dict) else None
@@ -232,9 +244,9 @@ class RunnerContext:
             log.error("agent error: %s", exc)
             return False, "\n".join(captured_parts)
         finally:
-            heartbeat_task.cancel()
+            self._heartbeat_task.cancel()
             with suppress(asyncio.CancelledError):
-                await heartbeat_task
+                await self._heartbeat_task
 
     # ── Internal helpers ──────────────────────────────────────────────────
 

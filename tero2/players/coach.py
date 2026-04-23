@@ -130,6 +130,8 @@ class CoachPlayer(BasePlayer):
             for i in range(1, _MAX_TASKS + 1):
                 tid = f"T{i:02d}"
                 content = self.disk.read_file(f"{milestone_path}/{sid}/{tid}-SUMMARY.md")
+                if not content:
+                    break
                 if content:
                     entry = f"### {sid}/{tid}\n{content}"
                     if total_size + len(entry) > _SIZE_CAP:
@@ -200,7 +202,7 @@ def _parse_sections(output: str) -> dict[str, str]:
         end = matches[i + 1].start() if i + 1 < len(matches) else len(output)
         chunk = output[start:end].strip()
         if section_name in result:
-            result[section_name] = result[section_name] + "\n" + chunk
+            result[section_name] = result[section_name] + "\n\n" + chunk
         else:
             result[section_name] = chunk
     return result

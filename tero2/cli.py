@@ -66,6 +66,7 @@ def cmd_run(args: argparse.Namespace) -> None:
             sys.exit(1)
         config = load_config(project_path, override_path=config_path)
 
+    # headless mode: no stream_bus, dispatcher, or command_queue — events are not emitted
     runner = Runner(project_path, plan_file, config=config)
     asyncio.run(runner.run())
 

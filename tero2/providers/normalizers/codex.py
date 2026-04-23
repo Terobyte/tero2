@@ -58,6 +58,10 @@ class CodexNormalizer:
             Zero or one :class:`~tero2.stream_bus.StreamEvent`.
         """
         if not isinstance(raw, dict):
+            yield StreamEvent(
+                role=role, kind="error", timestamp=now(),
+                content=f"codex: expected dict, got {type(raw).__name__}",
+            )
             return
 
         kind = raw.get("type")

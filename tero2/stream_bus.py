@@ -18,10 +18,13 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Literal
+
+log = logging.getLogger(__name__)
 
 StreamEventKind = Literal[
     "text",       # agent narration
@@ -136,12 +139,18 @@ class StreamBus:
         """Remove a previously subscribed queue. Acquires the subscriber lock.
 
         Silently does nothing if the queue is not currently registered.
+        Drains the queue before removal to release pending StreamEvent references.
         """
         with self._sub_lock:
             try:
                 self._subscribers.remove(q)
             except ValueError:
-                pass
+                return
+        while True:
+            try:
+                q.get_nowait()
+            except asyncio.QueueEmpty:
+                break
 
     # ── publishing ───────────────────────────────────────────────────────────
 
@@ -151,8 +160,8 @@ class StreamBus:
         Called synchronously from within async provider loops. Captures the
         running event loop on the first call. If called from a worker thread
         (no running loop in that thread), delegates to the captured main loop
-        via ``call_soon_threadsafe``. If no loop has been captured yet, the
-        call is silently dropped.
+        via the thread-safe loop callback mechanism. If no loop has been
+        captured yet, the call is silently dropped.
         """
         try:
             current_loop = asyncio.get_running_loop()
@@ -163,7 +172,10 @@ class StreamBus:
             # call closes the previous loop, so self._loop may point to a closed
             # loop if the StreamBus outlives one asyncio.run() session.
             if self._loop is not None and not self._loop.is_closed():
-                self._loop.call_soon_threadsafe(self._publish_impl, event)
+                try:
+                    self._loop.call_soon_threadsafe(self._publish_impl, event)
+                except RuntimeError:
+                    pass  # loop closed between is_closed() check and call
             return
         if self._loop is None:
             # First call from an event loop — capture it as the authoritative loop.
@@ -177,7 +189,10 @@ class StreamBus:
             if self._loop.is_closed():
                 self._loop = current_loop
             else:
-                self._loop.call_soon_threadsafe(self._publish_impl, event)
+                try:
+                    self._loop.call_soon_threadsafe(self._publish_impl, event)
+                except RuntimeError:
+                    pass  # loop closed between is_closed() check and call
                 return
         self._publish_impl(event)
 
@@ -192,12 +207,13 @@ class StreamBus:
         with self._sub_lock:
             subscribers = list(self._subscribers)
         for q in subscribers:
-            if q.full():
-                try:
-                    q.get_nowait()  # drop oldest
-                except (asyncio.QueueEmpty, Exception):
-                    pass
             try:
                 q.put_nowait(event)
-            except (asyncio.QueueFull, Exception):
-                pass  # one bad subscriber must not poison others
+            except asyncio.QueueFull:
+                try:
+                    q.get_nowait()  # drop oldest (ring-buffer)
+                    q.put_nowait(event)
+                except (asyncio.QueueEmpty, asyncio.QueueFull):
+                    log.debug("stream_bus: dropped event for slow subscriber")
+            except Exception:
+                log.debug("stream_bus: dead subscriber removed from fan-out")

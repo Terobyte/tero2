@@ -64,28 +64,24 @@ class CheckpointManager:
 
     def mark_completed(self, state: AgentState) -> AgentState:
         state = self._transition(state, Phase.COMPLETED)
-        state.touch()
         self.save(state)
         return state
 
     def mark_failed(self, state: AgentState, error: str) -> AgentState:
         state = self._transition(state, Phase.FAILED)
         state.error_message = error
-        state.touch()
         self.save(state)
         return state
 
     def mark_paused(self, state: AgentState, reason: str) -> AgentState:
         state = self._transition(state, Phase.PAUSED)
         state.error_message = reason
-        state.touch()
         self.save(state)
         return state
 
     def mark_running(self, state: AgentState) -> AgentState:
         state = self._transition(state, Phase.RUNNING)
         state.error_message = ""
-        state.touch()
         self.save(state)
         return state
 

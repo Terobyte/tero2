@@ -203,11 +203,22 @@ async def run_execute(
         # task from scratch if the process dies during it.
         # task_in_progress=True marks that this task is in flight; it is cleared
         # to False only after the task passes (see post-task bookkeeping below).
+        _prev_task_in_progress = ctx.state.task_in_progress
+        _prev_sora_phase = ctx.state.sora_phase
+        _prev_current_task = ctx.state.current_task
+        _prev_current_task_index = ctx.state.current_task_index
         ctx.state.task_in_progress = True
         ctx.state.sora_phase = SoraPhase.EXECUTE
         ctx.state.current_task = task.id
         ctx.state.current_task_index = task_index
-        ctx.checkpoint.save(ctx.state)
+        try:
+            ctx.checkpoint.save(ctx.state)
+        except OSError as _save_err:
+            ctx.state.task_in_progress = _prev_task_in_progress
+            ctx.state.sora_phase = _prev_sora_phase
+            ctx.state.current_task = _prev_current_task
+            ctx.state.current_task_index = _prev_current_task_index
+            log.warning("execute: task-start checkpoint failed — rollback applied: %s", _save_err)
 
         task_plan = _format_task_plan(task)
 
@@ -280,7 +291,10 @@ async def run_execute(
             if esc_action.level != EscalationLevel.NONE:
                 old_level = ctx.escalation_level
                 ctx.escalation_level = esc_action.level
-                if esc_action.level.value > old_level.value:
+                if (
+                    not ctx.escalation_history
+                    or ctx.escalation_history[-1] != esc_action.level
+                ):
                     ctx.escalation_history.append(esc_action.level)
                 ctx.state = await execute_escalation(
                     esc_action,
@@ -291,6 +305,7 @@ async def run_execute(
                     stuck_result=stuck_result,
                     escalation_history=ctx.escalation_history,
                 )
+                ctx.escalation_level = EscalationLevel(ctx.state.escalation_level)
                 ctx.checkpoint.save(ctx.state)
                 if esc_action.should_pause:
                     log.info("execute: human escalation — pausing for STEER.md input")
@@ -456,7 +471,10 @@ async def run_execute(
             ctx.checkpoint.save(ctx.state)
 
         # Update metrics after each task regardless of outcome.
-        _update_task_metrics(ctx.disk, task.id, task_passed)
+        try:
+            _update_task_metrics(ctx.disk, task.id, task_passed)
+        except OSError as _metrics_err:
+            log.warning("execute: metrics update failed: %s", _metrics_err)
 
     # Advance past the last task so crash recovery does not re-run on resume.
     ctx.state.task_in_progress = False

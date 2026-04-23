@@ -40,13 +40,21 @@ class Notifier:
         if not self._enabled:
             return False
         try:
-            resp = await asyncio.to_thread(
-                requests.post,
-                f"https://api.telegram.org/bot{self.config.bot_token}/sendMessage",
-                data={"chat_id": self.config.chat_id, "text": text},
-                timeout=10,
+            resp = await asyncio.wait_for(
+                asyncio.to_thread(
+                    requests.post,
+                    f"https://api.telegram.org/bot{self.config.bot_token}/sendMessage",
+                    data={"chat_id": self.config.chat_id, "text": text},
+                    timeout=10,
+                ),
+                timeout=15,
             )
-            return resp.status_code == 200
+            if resp.status_code != 200:
+                return False
+            if not resp.json().get("ok", False):
+                log.warning("telegram api error: %s", resp.json())
+                return False
+            return True
         except Exception:
             log.warning("telegram send failed", exc_info=True)
             return False
@@ -54,7 +62,13 @@ class Notifier:
     async def send_voice(self, text: str) -> bool:
         if not self._enabled:
             return False
-        audio_path = await asyncio.to_thread(self._generate_tts, text)
+        try:
+            audio_path = await asyncio.wait_for(
+                asyncio.to_thread(self._generate_tts, text), timeout=30
+            )
+        except asyncio.TimeoutError:
+            log.warning("TTS generation timed out")
+            return False
         if audio_path is None:
             return False
         try:

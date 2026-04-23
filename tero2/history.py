@@ -44,7 +44,7 @@ def load_history() -> list[HistoryEntry]:
     try:
         raw = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
         return [HistoryEntry(**e) for e in raw.get("entries", [])]
-    except (FileNotFoundError, json.JSONDecodeError, TypeError):
+    except (FileNotFoundError, json.JSONDecodeError, TypeError, OSError):
         return []
 
 

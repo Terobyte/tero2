@@ -91,7 +91,10 @@ class UsageTracker:
         offset = random.uniform(0, _STARTUP_OFFSET_MAX_S)
         await asyncio.sleep(offset)
         while True:
-            await self._refresh_limits()
+            try:
+                await self._refresh_limits()
+            except Exception as e:
+                log.warning("refresh_limits failed: %s", e)
             await asyncio.sleep(_REFRESH_INTERVAL_S)
 
     # ── session accumulation ───────────────────────────────────────────

@@ -252,22 +252,23 @@ class CLIProvider(BaseProvider):
                 proc.stdin.close()
                 await proc.stdin.wait_closed()
 
-        assert proc.stdout is not None
+        if proc.stdout is None:
+            raise ProviderError(f"{self._name}: subprocess stdout is None")
         try:
             async for event in self._stream_events(proc):
                 yield event
         finally:
             # If the consumer broke out of iteration early (cancellation, break,
-            # exception), _stream_events may not have reached proc.wait(). Force
-            # the subprocess to exit so we don't leak a zombie.
+            # exception), _stream_events may not have awaited process completion.
+            # Force the subprocess to exit so we don't leak a zombie.
             if proc.returncode is None:
                 try:
                     proc.kill()
                 except ProcessLookupError:
                     pass
                 try:
-                    await proc.wait()
-                except Exception:
+                    await asyncio.wait_for(proc.wait(), timeout=0.5)
+                except (asyncio.TimeoutError, Exception):
                     pass
 
 

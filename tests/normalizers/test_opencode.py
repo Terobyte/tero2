@@ -242,11 +242,12 @@ def test_opencode_type_key_without_part_yields_nothing() -> None:
     assert out == []
 
 
-def test_opencode_non_dict_raw_yields_nothing() -> None:
-    """Non-dict raw value must yield nothing (no exception)."""
+def test_opencode_non_dict_raw_yields_error() -> None:
+    """Non-dict raw must yield an error event (bug 126: silent data loss)."""
     n = OpenCodeNormalizer()
     out = list(n.normalize("not a dict", role="builder"))
-    assert out == []
+    assert len(out) == 1
+    assert out[0].kind == "error"
 
 
 # ── golden fixture round-trip ─────────────────────────────────────────────────

@@ -403,7 +403,7 @@ class TestDownloadFile:
 
         mock_resp_download = MagicMock()
         mock_resp_download.status_code = 200
-        mock_resp_download.text = "# Downloaded Plan\nHello"
+        mock_resp_download.content = b"# Downloaded Plan\nHello"
         mock_resp_download.raise_for_status = MagicMock()
 
         def mock_post(*args, **kwargs):

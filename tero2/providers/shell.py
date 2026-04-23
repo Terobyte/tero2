@@ -36,7 +36,7 @@ class ShellProvider(BaseProvider):
         )
         try:
             stdout, stderr = await proc.communicate()
-        except Exception:
+        except BaseException:
             proc.terminate()
             try:
                 await asyncio.wait_for(proc.wait(), timeout=0.2)
@@ -50,15 +50,10 @@ class ShellProvider(BaseProvider):
                     await proc.wait()
                 except Exception:
                     pass
-            # asyncio StreamReaders expose no public .close(); their backing
-            # _PipeReadTransport is closed by the loop once the process exits.
-            # Touch the private transport to force FD release in long-running
-            # servers that would otherwise wait for GC.
             for stream in (getattr(proc, "stdout", None), getattr(proc, "stderr", None)):
-                transport = getattr(stream, "_transport", None) if stream is not None else None
-                if transport is not None:
+                if stream is not None:
                     try:
-                        transport.close()
+                        stream.close()
                     except Exception:
                         pass
             raise

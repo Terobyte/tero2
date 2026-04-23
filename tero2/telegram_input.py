@@ -53,6 +53,7 @@ class TelegramInputBot:
         self._plan_queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
         self._running = False
         self._paused = False
+        self._watcher_tasks: set[asyncio.Task] = set()
         # Queue holds (project_name, plan_content) tuples.
         # Polling loop enqueues; a separate consumer coroutine dequeues and processes.
         # This prevents the race where two rapid messages both try to acquire the lock:
@@ -72,16 +73,10 @@ class TelegramInputBot:
         )
 
     async def stop(self) -> None:
-        """Stop the bot gracefully. Drains the queue before exiting."""
+        """Stop the bot gracefully."""
         self._running = False
         self._paused = False
-        while not self._plan_queue.empty():
-            try:
-                self._plan_queue.get_nowait()
-                self._plan_queue.task_done()
-            except asyncio.QueueEmpty:
-                break
-        await self._plan_queue.join()
+        self._plan_queue = asyncio.Queue()
 
     async def _poll_loop(self) -> None:
         """Long-poll getUpdates and dispatch messages."""
@@ -228,7 +223,7 @@ class TelegramInputBot:
 
             try:
                 project_name, plan_content = await asyncio.wait_for(
-                    self._plan_queue.get(), timeout=5.0
+                    self._plan_queue.get(), timeout=0.5
                 )
             except asyncio.TimeoutError:
                 continue
@@ -284,7 +279,9 @@ class TelegramInputBot:
             stderr=asyncio.subprocess.PIPE,
         )
         log.info(f"launched runner (PID {proc.pid}) for {project_path.name}")
-        asyncio.create_task(self._watch_runner(proc, project_path))
+        task = asyncio.create_task(self._watch_runner(proc, project_path))
+        self._watcher_tasks.add(task)
+        task.add_done_callback(self._watcher_tasks.discard)
         await asyncio.sleep(0)  # yield so watcher starts before we return
 
     async def _watch_runner(
@@ -296,6 +293,8 @@ class TelegramInputBot:
             if proc.returncode != 0:
                 stderr_bytes = await proc.stderr.read()
                 stderr_text = stderr_bytes.decode(errors="replace").strip()
+                if "\ufffd" in stderr_text:
+                    log.warning("_watch_runner: non-UTF-8 bytes in stderr — replacement chars introduced")
                 msg = f"runner for '{project_path.name}' failed to start (exit {proc.returncode})"
                 if stderr_text:
                     msg += f"\n{stderr_text}"
@@ -315,7 +314,12 @@ class TelegramInputBot:
                                 break
                     except Exception:
                         pass
-                asyncio.create_task(_drain_stderr())
+                drain_task = asyncio.create_task(_drain_stderr())
+                drain_task.add_done_callback(
+                    lambda t: log.warning("stderr drain failed: %s", t.exception())
+                    if not t.cancelled() and t.exception() is not None
+                    else None
+                )
 
     def _is_allowed(self, chat_id: str) -> bool:
         """Check if chat_id is in the allowed list."""
@@ -357,7 +361,7 @@ class TelegramInputBot:
             )
             resp = await asyncio.to_thread(requests.get, download_url, timeout=30)
             if resp.status_code == 200:
-                return resp.text
+                return resp.content.decode('utf-8', errors='replace')
             return None
         except Exception:
             log.error("file download failed", exc_info=True)

@@ -216,7 +216,7 @@ def _parse_config(raw: dict) -> Config:
             heartbeat_interval_s=tg.get("heartbeat_interval_s", DEFAULT_HEARTBEAT_INTERVAL_S),
             voice_on_done=tg.get("voice_on_done", True),
             voice_on_stuck=tg.get("voice_on_stuck", True),
-            allowed_chat_ids=[str(x) for x in tg.get("allowed_chat_ids", [])],
+            allowed_chat_ids=[str(x) for x in tg.get("allowed_chat_ids", []) if x is not None],
         )
 
     retry = raw.get("retry", {})

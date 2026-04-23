@@ -58,6 +58,7 @@ def _mk_response(json_body: dict, status: int = 200, text: str = "downloaded"):
     resp.json.return_value = json_body
     resp.status_code = status
     resp.text = text
+    resp.content = text.encode("utf-8")
     return resp
 
 

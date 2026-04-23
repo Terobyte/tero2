@@ -90,6 +90,8 @@ async def run_harden(ctx: RunnerContext) -> PhaseResult:
         review_prompt = _combine_prompt(review_assembled)
 
         review_result = await player.run(mode="review", prompt=review_prompt)
+        if ctx.shutdown_event and ctx.shutdown_event.is_set():
+            return PhaseResult(success=False, error="shutdown requested")
         if not review_result.success:
             log.error("harden: reviewer (find-issues) failed in round %d: %s", round_num, review_result.error)
             return PhaseResult(success=False, error=review_result.error)
@@ -129,6 +131,8 @@ async def run_harden(ctx: RunnerContext) -> PhaseResult:
         fix_prompt = _combine_prompt(fix_assembled)
 
         fix_result = await player.run(mode="fix", prompt=fix_prompt, review_findings=review_output)
+        if ctx.shutdown_event and ctx.shutdown_event.is_set():
+            return PhaseResult(success=False, error="shutdown requested")
         if not fix_result.success:
             log.error("harden: reviewer (apply-fixes) failed in round %d: %s", round_num, fix_result.error)
             return PhaseResult(success=False, error=fix_result.error)
@@ -137,14 +141,21 @@ async def run_harden(ctx: RunnerContext) -> PhaseResult:
             current_plan = fix_result.fixed_plan
 
         # Write intermediate version for debugging / recovery
-        ctx.disk.write_file(f"{ctx.milestone_path}/plan_v{round_num}.md", current_plan)
+        try:
+            ctx.disk.write_file(f"{ctx.milestone_path}/plan_v{round_num}.md", current_plan)
+        except OSError as e:
+            log.warning("harden: intermediate write failed (non-fatal): %s", e)
         if debug:
             log.info(
                 "harden round %d: applied fixes, plan is %d chars", round_num, len(current_plan)
             )
 
     # Write the final hardened plan
-    ctx.disk.write_file(f"{ctx.milestone_path}/PLAN.md", current_plan)
+    try:
+        ctx.disk.write_file(f"{ctx.milestone_path}/PLAN.md", current_plan)
+    except OSError as e:
+        log.error("harden: failed to write PLAN.md: %s", e)
+        return PhaseResult(success=False, error=f"PLAN.md write failed: {e}")
     log.info("harden complete — PLAN.md written (%d chars)", len(current_plan))
     return PhaseResult(success=True, data=current_plan)
 

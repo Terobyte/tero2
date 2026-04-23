@@ -31,7 +31,7 @@ class FileLock:
             os.lseek(fd, 0, os.SEEK_SET)
             os.write(fd, pid_bytes)
             os.truncate(self.lock_path, len(pid_bytes))
-        except:
+        except OSError:
             os.close(fd)
             raise
         self._fd = fd

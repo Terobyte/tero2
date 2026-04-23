@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, ClassVar
 
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Label, ProgressBar, Static
+
+log = logging.getLogger(__name__)
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -140,14 +143,14 @@ class UsagePanel(Widget):
         if self.compact:
             # in compact mode remove all rows, show only summary
             for row in list(self._rows.values()):
-                row.remove()
+                row.destroy()
             self._rows.clear()
             return
 
         # remove rows that are no longer in limits
         for name in list(self._rows):
             if name not in self._limits:
-                self._rows[name].remove()
+                self._rows[name].destroy()
                 del self._rows[name]
 
         # add or update rows
@@ -181,3 +184,9 @@ class UsagePanel(Widget):
             _fmt_cost(total_cost),
         ]
         summary_widget.update("  ".join(parts))
+
+    def _destroy_row(self, row: "_ProviderRow") -> None:
+        try:
+            row.destroy()
+        except Exception as exc:
+            log.warning("usage: failed to destroy provider row: %s", exc)

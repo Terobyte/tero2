@@ -88,7 +88,11 @@ class ScoutPlayer(BasePlayer):
 
         Returns an empty string (with a logged warning) if the file is absent.
         """
-        content = self.disk.read_file("persistent/PROJECT.md")
+        try:
+            content = self.disk.read_file("persistent/PROJECT.md")
+        except OSError:
+            log.warning("persistent/PROJECT.md not found — Scout will use file tree only")
+            return ""
         if not content:
             log.warning(
                 "persistent/PROJECT.md not found — Scout will use file tree only"

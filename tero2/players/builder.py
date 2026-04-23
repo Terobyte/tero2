@@ -85,6 +85,7 @@ class BuilderPlayer(BasePlayer):
 
             summary = output.strip()
             if not summary:
+                log.warning("builder: empty output — attempting disk recovery for %s", task_id)
                 summary = self._recover_summary_from_disk(task_id, self.working_dir)
             if not summary:
                 # Some agent tools (opencode/codex) write files and commit

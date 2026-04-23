@@ -104,17 +104,17 @@ class ProviderChain:
                     jitter = random.uniform(0, self._rate_limit_wait_s * 0.1)
                     await asyncio.sleep(wait + jitter)
 
-                # Track whether we have yielded any message to the caller.
-                # Error before first yield → retry/failover (safe, nothing sent yet).
-                # Error after first yield → hard-fail (can't retry a partial stream).
-                yielded_anything = False
+                # Buffer messages per attempt and forward only on success.
+                # This prevents duplicate delivery when a recoverable error
+                # triggers a retry after partial output has been read.
+                msg_buffer: list[Any] = []
+                buffered_any = False
                 try:
                     async with aclosing(provider.run(**kwargs)) as stream:
                         async for msg in stream:
-                            # First message is an error-dict → treat as pre-yield
-                            # stream failure so the retry/failover path applies.
+                            # First message is an error-dict → stream failure.
                             if (
-                                not yielded_anything
+                                not msg_buffer
                                 and isinstance(msg, dict)
                                 and msg.get("type") == "error"
                             ):
@@ -133,33 +133,33 @@ class ProviderChain:
                                 else:
                                     error_msg = str(error_data) or "stream error"
                                 raise ProviderError(error_msg)
-                            yielded_anything = True
-                            yield msg
+                            msg_buffer.append(msg)
+                            buffered_any = True
+                    # Stream succeeded — forward buffered messages to consumer.
+                    for msg in msg_buffer:
+                        yield msg
                     cb.record_success()
                     return
                 except Exception as exc:
                     if not _is_recoverable_error(exc):
-                        # Non-recoverable: hard-fail immediately, no retry.
-                        # Do NOT touch the circuit breaker — this is a
-                        # config/logic error, not a provider availability issue.
                         log.error(
                             "provider %s non-recoverable error: %s: %s",
                             provider.display_name,
                             type(exc).__name__,
                             exc,
                         )
+                        cb.record_failure()
                         raise
-                    if yielded_anything:
-                        # Recoverable but partial stream already sent: hard-fail.
+                    if buffered_any:
                         log.error(
-                            "provider %s failed mid-stream after first yield: %s: %s",
+                            "provider %s failed mid-stream after yielding: %s: %s",
                             provider.display_name,
                             type(exc).__name__,
                             exc,
                         )
                         cb.record_failure()
                         raise
-                    # Recoverable and nothing yielded yet: retry this provider.
+                    # Recoverable and nothing buffered yet: retry this provider.
                     if attempt >= self._rate_limit_max_retries:
                         # Exhausted retries for this provider — record failure,
                         # then try next provider in the outer loop.
@@ -182,6 +182,7 @@ class ProviderChain:
 
         if not any_attempted:
             raise CircuitOpenError("all providers circuit-broken")
+        self._current_provider_index = 0
         raise RateLimitError("all providers in chain exhausted")
 
     async def run_prompt(self, prompt: str) -> AsyncGenerator[Any, None]:

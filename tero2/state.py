@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -95,6 +95,8 @@ class AgentState:
     current_slice: str = ""
     current_task_index: int = 0
     task_in_progress: bool = False  # True between "before-task" and "after-task" checkpoint saves
+    div_steps: int = 0
+    escalation_history: list[str] = field(default_factory=list)
 
     def __setattr__(self, name: str, value: object) -> None:
         if name == "phase":

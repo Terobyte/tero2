@@ -35,6 +35,7 @@ from tero2.phases.context import (
 from tero2.project_lock import ProjectLock
 from tero2.providers.chain import ProviderChain
 from tero2.providers.registry import create_provider
+from tero2.stream_bus import StreamBus
 from tero2.reflexion import MAX_BUILDER_OUTPUT_CHARS, ReflexionContext, add_attempt
 from tero2.state import SORA_PHASE_ORDER, AgentState, Phase, SoraPhase
 from tero2.stuck_detection import StuckSignal, check_stuck
@@ -97,6 +98,7 @@ class Runner:
         *,
         dispatcher: EventDispatcher | None = None,
         command_queue: asyncio.Queue[Command] | None = None,
+        stream_bus: StreamBus | None = None,
     ) -> None:
         self.project_path = project_path
         self.plan_file = plan_file
@@ -114,6 +116,7 @@ class Runner:
         self._current_state: AgentState | None = None
         self._dispatcher = dispatcher
         self._command_queue = command_queue
+        self.stream_bus: StreamBus = stream_bus if stream_bus is not None else StreamBus()
         self._ctx: RunnerContext | None = None
         # Set True by a `skip_task` TUI command; consumed (and cleared) by
         # execute_phase at the next attempt boundary to advance past the
@@ -213,6 +216,7 @@ class Runner:
             shutdown_event=shutdown_event,
             dispatcher=self._dispatcher,
             command_queue=self._command_queue,
+            stream_bus=getattr(self, "stream_bus", None),
         )
 
     async def _emit_phase(self, phase: SoraPhase) -> None:
@@ -734,6 +738,7 @@ class Runner:
 
             state.current_slice = next_slice
             state.current_task_index = 0
+            ctx.reset()
             state = self.checkpoint.save(state)
             self._current_state = state
             extra_slices_done += 1

@@ -80,6 +80,12 @@ class ZaiNormalizer:
         """
         if raw is None:
             return
+        if not isinstance(raw, dict) and not hasattr(raw, "__dict__") and not hasattr(raw, "type"):
+            yield StreamEvent(
+                role=role, kind="error", timestamp=now(),
+                content=f"zai: expected dict or SDK object, got {type(raw).__name__}",
+            )
+            return
 
         kind = _get(raw, "type", "")
         ts = now()

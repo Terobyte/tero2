@@ -290,8 +290,35 @@ class DashboardApp(App):
     # ── responsive layout ────────────────────────────────────────────────────
 
     def on_resize(self, event) -> None:  # type: ignore[override]
-        usage_panel = self.query_one("#usage-panel", UsagePanel)
+        try:
+            usage_panel = self.query_one("#usage-panel", UsagePanel)
+        except NoMatches:
+            return
         if event.size.width < 100:
             usage_panel.compact = True
         else:
             usage_panel.compact = False
+
+    def action_toggle_raw(self) -> None:
+        try:
+            from tero2.tui.widgets.stream_panel import StreamPanel
+            panel = self.query_one(StreamPanel)
+            panel.toggle_raw()
+        except NoMatches:
+            pass
+
+    def action_clear_stream(self) -> None:
+        try:
+            from tero2.tui.widgets.stream_panel import StreamPanel
+            panel = self.query_one(StreamPanel)
+            panel.clear()
+        except NoMatches:
+            pass
+
+    def action_unpin(self) -> None:
+        try:
+            from tero2.tui.widgets.stream_panel import StreamPanel
+            panel = self.query_one(StreamPanel)
+            panel.unpin()
+        except NoMatches:
+            pass
