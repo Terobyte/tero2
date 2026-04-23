@@ -120,6 +120,9 @@ class StreamBus:
         # threading.Lock guards _subscribers so subscribe/unsubscribe cannot
         # mutate the list while _publish_impl iterates it.
         self._sub_lock = threading.Lock()
+        # Bug 261: buffer events published before any loop is captured
+        self._pending: list[StreamEvent] = []
+        self._pending_lock = threading.Lock()
 
     # ── subscriber management ────────────────────────────────────────────────
 
@@ -131,26 +134,40 @@ class StreamBus:
         subscriber lock to serialise list mutation against publish.
         """
         q: asyncio.Queue[StreamEvent] = asyncio.Queue(maxsize=self._max)
+        q._bus_subscribed = True  # type: ignore[attr-defined]  # bug 259 marker
         with self._sub_lock:
             self._subscribers.append(q)
+        # Bug 261: if we're on an event loop and there are buffered events, drain them now
+        try:
+            loop = asyncio.get_running_loop()
+            if self._loop is None:
+                self._loop = loop
+                with self._pending_lock:
+                    pending, self._pending = self._pending, []
+                for ev in pending:
+                    self._publish_impl(ev)
+        except RuntimeError:
+            pass
         return q
 
     def unsubscribe(self, q: asyncio.Queue[StreamEvent]) -> None:
         """Remove a previously subscribed queue. Acquires the subscriber lock.
 
         Silently does nothing if the queue is not currently registered.
-        Drains the queue before removal to release pending StreamEvent references.
+        Drains the queue inside the lock to prevent concurrent publishes from
+        adding events after removal but before drain completes.
         """
+        q._bus_subscribed = False  # type: ignore[attr-defined]  # bug 259 marker
         with self._sub_lock:
             try:
                 self._subscribers.remove(q)
             except ValueError:
                 return
-        while True:
-            try:
-                q.get_nowait()
-            except asyncio.QueueEmpty:
-                break
+            while True:
+                try:
+                    q.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
 
     # ── publishing ───────────────────────────────────────────────────────────
 
@@ -167,19 +184,23 @@ class StreamBus:
             current_loop = asyncio.get_running_loop()
         except RuntimeError:
             # Worker-thread path: no event loop running in this thread.
-            # Forward to the captured main loop if one is available and still open.
-            # Guard against the asyncio.run()-restart scenario: each asyncio.run()
-            # call closes the previous loop, so self._loop may point to a closed
-            # loop if the StreamBus outlives one asyncio.run() session.
             if self._loop is not None and not self._loop.is_closed():
                 try:
                     self._loop.call_soon_threadsafe(self._publish_impl, event)
                 except RuntimeError:
                     pass  # loop closed between is_closed() check and call
+            else:
+                # Bug 261: no loop captured yet — buffer for later drain
+                with self._pending_lock:
+                    self._pending.append(event)
             return
         if self._loop is None:
-            # First call from an event loop — capture it as the authoritative loop.
+            # First call from an event loop — capture and drain buffered events.
             self._loop = current_loop
+            with self._pending_lock:
+                pending, self._pending = self._pending, []
+            for pending_event in pending:
+                self._publish_impl(pending_event)
         elif current_loop is not self._loop:
             # Foreign event-loop thread: marshal onto the captured main loop so
             # _publish_impl always executes on the same loop that owns the queues.
@@ -207,6 +228,9 @@ class StreamBus:
         with self._sub_lock:
             subscribers = list(self._subscribers)
         for q in subscribers:
+            # Bug 259: skip queues that have been unsubscribed
+            if not getattr(q, "_bus_subscribed", True):
+                continue
             try:
                 q.put_nowait(event)
             except asyncio.QueueFull:
@@ -215,5 +239,12 @@ class StreamBus:
                     q.put_nowait(event)
                 except (asyncio.QueueEmpty, asyncio.QueueFull):
                     log.debug("stream_bus: dropped event for slow subscriber")
-            except Exception:
+            except (RuntimeError, AttributeError):
+                # RuntimeError: queue bound to a closed event loop. Attr: bad
+                # subscriber shape. Evict so one bad queue cannot block fan-out.
                 log.debug("stream_bus: dead subscriber removed from fan-out")
+                with self._sub_lock:  # bug 262: actually remove dead subscriber
+                    try:
+                        self._subscribers.remove(q)
+                    except ValueError:
+                        pass

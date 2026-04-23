@@ -47,10 +47,12 @@ def init_project(
     projects_dir = Path(config.projects_dir).expanduser().resolve()
     project_path = projects_dir / safe_name
 
-    if project_path.exists():
+    # Bug 194: use mkdir(exist_ok=False) directly and catch FileExistsError
+    # instead of a separate exists() check — avoids TOCTOU race window.
+    try:
+        project_path.mkdir(parents=True, exist_ok=False)
+    except FileExistsError:
         raise FileExistsError(f"Project directory already exists: {project_path}")
-
-    project_path.mkdir(parents=True, exist_ok=False)
 
     # git init
     try:
@@ -97,14 +99,15 @@ def _extract_project_name(plan: str) -> str:
     # Try first markdown heading
     heading_match = re.search(r"^#\s+(.+)$", plan, re.MULTILINE)
     if heading_match:
-        return heading_match.group(1).strip()
+        name = heading_match.group(1).strip()
+    else:
+        name = ""
+        for line in plan.splitlines():
+            stripped = line.strip()
+            if stripped:
+                name = re.sub(r"^[-*]\s+", "", stripped)
+                break
 
-    # Fall back to first non-empty line
-    for line in plan.splitlines():
-        stripped = line.strip()
-        if stripped:
-            # Remove markdown list/bullet prefixes
-            cleaned = re.sub(r"^[-*]\s+", "", stripped)
-            return cleaned
-
-    return "untitled-project"
+    # Sanitize: strip path traversal components (..) and separators
+    name = name.replace("..", "").replace("/", "").replace("\\", "").strip()
+    return name or "untitled-project"

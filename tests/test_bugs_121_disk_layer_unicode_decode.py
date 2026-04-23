@@ -36,13 +36,15 @@ def test_read_file_does_not_raise_on_non_utf8_bytes(tmp_path: Path) -> None:
     target.write_bytes(b"\x93steer directive\x94")
 
     # Broken code raises UnicodeDecodeError here.
-    # Fixed code returns "" (same contract as other unreadable files).
+    # Fixed code returns either None or "" (degrades silently — no exception).
+    # Bug 292 later refined the contract to return None (so callers can
+    # distinguish a corrupt file from a permission-denied one which returns "").
     result = disk.read_file("human/STEER.md")
 
-    assert result == "", (
-        "bug 121: read_file must degrade to '' on non-UTF-8 content, "
-        "mirroring the existing OSError branch. An operator saving "
-        "STEER.md in cp1252 should not crash the runner. "
+    assert result in (None, ""), (
+        "bug 121: read_file must degrade silently on non-UTF-8 content "
+        "(no exception). Either None (corruption, per bug 292) or '' "
+        "(permission-style degrade) is acceptable. "
         f"got {result!r}"
     )
 

@@ -90,7 +90,7 @@ class CodexNormalizer:
         elif kind == "done":
             yield StreamEvent(role=role, kind="turn_end", timestamp=ts, raw=raw)
         elif kind == "error":
-            msg = raw.get("message", "") or raw.get("error", "")
+            msg = raw.get("message") or raw.get("error") or "unknown error"
             yield StreamEvent(
                 role=role, kind="error", timestamp=ts, content=msg, raw=raw,
             )

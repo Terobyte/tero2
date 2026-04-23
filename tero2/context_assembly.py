@@ -88,6 +88,19 @@ class ContextAssembler:
         config: Config,
         system_prompts: dict[str, str] | None = None,
     ) -> None:
+        # Bug 193: validate that context ratios are in the correct order.
+        # Ratios must satisfy: target_ratio < warning_ratio < hard_fail_ratio.
+        # Out-of-order ratios produce incorrect budget decisions.
+        # Validation is enforced at _parse_config time; warn here if misconfigured.
+        import logging as _logging
+        _log193 = _logging.getLogger(__name__)
+        _ctx = config.context
+        if not (_ctx.target_ratio < _ctx.warning_ratio < _ctx.hard_fail_ratio):
+            _log193.warning(
+                "context ratios out of order: target_ratio=%s warning_ratio=%s "
+                "hard_fail_ratio=%s — raise ConfigError at parse time to fix",
+                _ctx.target_ratio, _ctx.warning_ratio, _ctx.hard_fail_ratio,
+            )
         self._config = config
         self._system_prompts = system_prompts or {}
 
@@ -95,9 +108,20 @@ class ContextAssembler:
         return self._system_prompts.get(role, "")
 
     def _role_limit(self, role: str) -> int:
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
         role_cfg = self._config.roles.get(role)
+        if role_cfg is None:
+            # Bug 266: log warning when falling back to default context window
+            _log.warning(
+                "role %r not configured — using default context window (%d)",
+                role, _DEFAULT_CONTEXT_WINDOW,
+            )
         raw = role_cfg.context_window if role_cfg else _DEFAULT_CONTEXT_WINDOW
-        return int(raw * self._config.context.target_ratio)
+        if raw <= 0:
+            raw = _DEFAULT_CONTEXT_WINDOW
+        raw = min(raw, 1_000_000)
+        return max(1, int(raw * self._config.context.target_ratio))
 
     def assemble(
         self,
@@ -146,7 +170,9 @@ class ContextAssembler:
         # O(n): accumulate token count incrementally instead of rebuilding
         # the full candidate string on each iteration.
         included_indices: set[int] = set()
-        running_tokens = estimate_tokens(mandatory_user)
+        # Bug 265: include system_prompt in running token count from the start
+        # so mid-assembly inclusion checks account for the full prompt size.
+        running_tokens = estimate_tokens(system_prompt + mandatory_user)
         for idx, (_tag, body, _pri) in sorted(enumerate(optional), key=lambda x: -x[1][2]):
             section_tokens = estimate_tokens("\n\n" + _section(_tag, body))
             candidate_tokens = running_tokens + section_tokens

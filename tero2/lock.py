@@ -24,17 +24,20 @@ class FileLock:
             os.close(fd)
             if exc.errno in (errno.EAGAIN, errno.EACCES):
                 pid = self._read_pid()
+                if pid and not self._pid_alive(pid):
+                    pass  # stale lock from dead process; caller handles LockHeldError
                 raise LockHeldError(pid, str(self.lock_path)) from exc
             raise
         pid_bytes = f"{os.getpid()}\n".encode()
+        self._fd = fd
         try:
             os.lseek(fd, 0, os.SEEK_SET)
             os.write(fd, pid_bytes)
             os.truncate(self.lock_path, len(pid_bytes))
         except OSError:
+            self._fd = None
             os.close(fd)
             raise
-        self._fd = fd
 
     def release(self) -> None:
         if self._fd is not None:
@@ -53,7 +56,12 @@ class FileLock:
 
     def _read_pid(self) -> int:
         try:
-            return int(self.lock_path.read_text().strip())
+            # errors="replace": the lock file is operator-visible and a corrupt
+            # byte shouldn't crash stale-lock detection. The int() call below
+            # will reject non-numeric content via ValueError.
+            return int(
+                self.lock_path.read_text(encoding="utf-8", errors="replace").strip()
+            )
         except (OSError, ValueError):
             return 0
 

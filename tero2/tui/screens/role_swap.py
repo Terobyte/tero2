@@ -87,10 +87,43 @@ class RoleSwapScreen(Screen):
     @app.setter
     def app(self, value) -> None:  # type: ignore[override]
         self._app_override = value
-        # When step 3 is active and app context changes, ensure the screen can
-        # always navigate back (guards against the cancel-with-no-else-branch bug).
-        if self._step == 3:
-            self._enter_step2()
+
+    async def _handle_provider_selected(self, provider: str) -> None:
+        """Async handler: fetch models and push ModelPickScreen."""
+        if provider == "gemma":
+            self.notify("gemma — in development", severity="warning")
+            return
+        try:
+            models = await get_models(provider)
+        except Exception as exc:
+            self.notify(f"Ошибка получения моделей: {exc}", severity="error")
+            return
+        if not models:
+            self.notify(f"Нет доступных моделей для {provider}", severity="warning")
+            return
+        from tero2.tui.screens.model_pick import ModelPickScreen
+
+        def _on_model(entry: ModelEntry | None) -> None:
+            if entry is not None and self._selected_role:
+                self.app.post_message(
+                    SwitchProviderMessage(
+                        role=self._selected_role,
+                        provider=provider,
+                        model=entry.id,
+                    )
+                )
+                self.dismiss(None)
+            else:
+                self._enter_step2()
+
+        self.app.push_screen(
+            ModelPickScreen(
+                cli_name=provider,
+                role_name=self._selected_role or "",
+                entries=models,
+            ),
+            _on_model,
+        )
 
     # ── compose ──────────────────────────────────────────────────────────────
 
@@ -189,40 +222,3 @@ class RoleSwapScreen(Screen):
             lv.focus()
         except Exception:
             pass
-
-    async def _handle_provider_selected(self, provider: str) -> None:
-        """Async handler: fetch models and push ModelPickScreen."""
-        if provider == "gemma":
-            self.notify("gemma — in development", severity="warning")
-            return
-        try:
-            models = await get_models(provider)
-        except Exception as exc:
-            self.notify(f"Ошибка получения моделей: {exc}", severity="error")
-            return
-        if not models:
-            self.notify(f"Нет доступных моделей для {provider}", severity="warning")
-            return
-        from tero2.tui.screens.model_pick import ModelPickScreen
-
-        def _on_model(entry: ModelEntry | None) -> None:
-            if entry is not None and self._selected_role:
-                self.app.post_message(
-                    SwitchProviderMessage(
-                        role=self._selected_role,
-                        provider=provider,
-                        model=entry.id,
-                    )
-                )
-                self.dismiss(None)
-            else:
-                self._enter_step2()
-
-        self.app.push_screen(
-            ModelPickScreen(
-                cli_name=provider,
-                role_name=self._selected_role or "",
-                entries=models,
-            ),
-            _on_model,
-        )

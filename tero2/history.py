@@ -20,7 +20,7 @@ def _history_lock():
     _LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
     fd = None
     try:
-        fd = open(_LOCK_FILE, "a+")
+        fd = open(_LOCK_FILE, "a+", encoding="utf-8")
         fcntl.flock(fd.fileno(), fcntl.LOCK_EX)
         yield
     finally:
@@ -44,7 +44,7 @@ def load_history() -> list[HistoryEntry]:
     try:
         raw = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
         return [HistoryEntry(**e) for e in raw.get("entries", [])]
-    except (FileNotFoundError, json.JSONDecodeError, TypeError, OSError):
+    except (FileNotFoundError, json.JSONDecodeError, TypeError, OSError, UnicodeDecodeError):
         return []
 
 

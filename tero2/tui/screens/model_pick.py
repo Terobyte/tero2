@@ -106,5 +106,11 @@ class ModelPickScreen(ModalScreen[ModelEntry | None]):
         if self._filtered:
             self.query_one("#model-list", ListView).focus()
 
+    def on_unmount(self) -> None:
+        """Cancel any pending debounce timer to prevent callbacks on a destroyed screen."""
+        if self._debounce_timer is not None:
+            self._debounce_timer.stop()
+            self._debounce_timer = None
+
     def action_focus_search(self) -> None:
         self.query_one("#model-search", Input).focus()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from pathlib import Path
 
@@ -14,6 +15,7 @@ class DiskLayer:
         self.project_path = project_path
         self.sora_dir = project_path / ".sora"
         self._metrics_lock = threading.Lock()
+        self._activity_lock = threading.Lock()
         # Per-instance, per-thread last-read tracking for delta-based write_metrics
         self._metrics_thread_local = threading.local()
 
@@ -48,11 +50,16 @@ class DiskLayer:
             return (self.sora_dir / relative_path).read_text(encoding="utf-8")
         except FileNotFoundError:
             return None
-        except (OSError, UnicodeDecodeError):
-            # Bug 121: UnicodeDecodeError is a ValueError, not an OSError,
-            # so operator-written files (STEER.md, OVERRIDE.md, PROJECT.md)
-            # saved in cp1252/latin-1 crashed the runner. Treat the same as
-            # OSError — degrade to empty string.
+        except UnicodeDecodeError:
+            # Bug 292: return None (not "") so callers can distinguish an
+            # encoding-corrupted file from a legitimately empty one.
+            # FileNotFoundError → None (missing); UnicodeDecodeError → None (corrupt).
+            # OSError → "" (exists but temporarily unreadable / permission issue).
+            return None
+        except OSError:
+            # Preserve existing contract: OS errors (e.g. PermissionError) return ""
+            # so callers can distinguish "file exists but unreadable" (== "")
+            # from "file missing" (is None).
             return ""
 
     def write_file(self, relative_path: str, content: str) -> bool:
@@ -64,11 +71,15 @@ class DiskLayer:
         except OSError:
             return False
 
-    def append_file(self, relative_path: str, content: str) -> None:
+    def append_file(self, relative_path: str, content: str) -> bool:
         path = self.sora_dir / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(content)
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(content)
+            return True
+        except OSError:
+            return False
 
     def _read_metrics_raw(self) -> dict:
         """Read metrics from disk without acquiring lock (caller holds lock)."""
@@ -107,15 +118,20 @@ class DiskLayer:
                     current[k] = v
             path = self.sora_dir / "reports" / "metrics.json"
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(current, indent=2), encoding="utf-8")
+            tmp = path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(current, indent=2), encoding="utf-8")
+            os.replace(tmp, path)
             # Update thread-local so subsequent write_metrics in same thread use fresh baseline
             self._metrics_thread_local.last_read = dict(current)
 
     def append_activity(self, event: dict) -> None:
         path = self.sora_dir / "reports" / "activity.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(event) + "\n")
+        with self._activity_lock:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(event) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
 
     def read_override(self) -> str:
         return self.read_file("human/OVERRIDE.md") or ""

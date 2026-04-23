@@ -184,11 +184,12 @@ class EventDispatcher:
                             del inner[i]
                             break
                     else:
-                        # Every slot holds a priority event — intentional one-item
-                        # overflow; bounded in practice (high-volume non-priority
-                        # events normally dominate the queue).
-                        inner.append(event)
-                        q._unfinished_tasks += 1  # type: ignore[attr-defined]
+                        # Every slot holds a priority event — allow limited overflow,
+                        # but cap at MAX_OVERFLOW to prevent unbounded growth.
+                        MAX_OVERFLOW = 100
+                        if len(inner) < q.maxsize + MAX_OVERFLOW:
+                            inner.append(event)
+                            q._unfinished_tasks += 1  # type: ignore[attr-defined]
                         continue  # skip the append below
                 else:
                     # Non-priority: discard the oldest non-priority item.

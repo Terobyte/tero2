@@ -214,13 +214,24 @@ async def run_execute(
         try:
             ctx.checkpoint.save(ctx.state)
         except OSError as _save_err:
-            ctx.state.task_in_progress = _prev_task_in_progress
+            # Rollback in-memory mutation so state stays consistent with disk
+            # (bug 127 — state mutated before save; rollback on failure).
+            ctx.state.task_in_progress = False
             ctx.state.sora_phase = _prev_sora_phase
             ctx.state.current_task = _prev_current_task
             ctx.state.current_task_index = _prev_current_task_index
-            log.warning("execute: task-start checkpoint failed — rollback applied: %s", _save_err)
+            log.error("execute: task-start checkpoint failed — aborting: %s", _save_err)
+            return PhaseResult(
+                success=False,
+                error=f"task-start checkpoint save failed: {_save_err}",
+            )
 
         task_plan = _format_task_plan(task)
+
+        # Bug 276: honor shutdown signals before building reflexion context —
+        # avoid the extra work if the process is about to exit anyway.
+        if ctx.shutdown_event is not None and ctx.shutdown_event.is_set():
+            return PhaseResult(success=False, error="shutdown requested")
 
         # Interrupted-task reflexion seeding (crash recovery).
         # When we are resuming at a previously-started task (start_index > 0
@@ -438,6 +449,7 @@ async def run_execute(
                     new_hints = ctx.disk.read_file("strategic/CONTEXT_HINTS.md")
                     if new_hints:
                         context_hints = new_hints
+                        effective_hints = context_hints
 
             ctx.state.retry_count += 1  # keep stuck-detection retry counter live
             truncated = (

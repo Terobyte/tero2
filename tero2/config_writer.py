@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import os
+import re
 from pathlib import Path
 
 try:
@@ -25,9 +27,14 @@ except ImportError:
 
 def _load_toml(path: Path) -> dict:
     try:
-        return _tomllib.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return {}
+    except UnicodeDecodeError as exc:
+        # Structured file: raise domain error rather than silently dropping content.
+        raise _ConfigError(f"Cannot decode {path} as UTF-8: {exc}") from exc
+    try:
+        return _tomllib.loads(text)
     except _tomllib.TOMLDecodeError as exc:
         raise _ConfigError(f"TOML syntax error in {path}: {exc}") from exc
 
@@ -68,6 +75,8 @@ def _simple_toml_dumps(data: dict, prefix: str = "") -> str:
                     return f'"{s}"'
             items = ", ".join(_item(i) for i in v)
             lines.append(f"{k} = [{items}]")
+        elif v is None:
+            continue  # TOML has no null type — skip None values
         else:
             lines.append(f"{k} = {v}")
     result = "\n".join(lines)
@@ -78,9 +87,17 @@ def _simple_toml_dumps(data: dict, prefix: str = "") -> str:
 
 def write_global_config_section(config_path: Path, section: str, values: dict) -> None:
     """Atomically update one section in a TOML file, preserving all other sections."""
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_.]*$', section):
+        raise ValueError(f"invalid section name: {section!r}")
     config_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = config_path.with_suffix(".lock")
-    lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o644)
+    except OSError as e:
+        if e.errno == errno.EEXIST:
+            lock_fd = os.open(str(lock_path), os.O_RDWR)
+        else:
+            raise
     tmp: Path | None = None
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
@@ -96,7 +113,10 @@ def write_global_config_section(config_path: Path, section: str, values: dict) -
         tmp.replace(config_path)
         tmp = None  # successfully renamed — nothing to clean up
     finally:
-        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
         os.close(lock_fd)
         if tmp is not None:
             try:

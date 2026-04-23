@@ -51,22 +51,26 @@ async def run_coach(
         log.warning("coach: cannot build chain: %s — skipping", exc)
         return PhaseResult(success=False, error=str(exc))
 
-    player = CoachPlayer(
-        chain,
-        ctx.disk,
-        working_dir=str(ctx.disk.project_path),
-    )
-    persona_prompt = ctx.personas.load_or_default("coach").system_prompt
+    try:
+        player = CoachPlayer(
+            chain,
+            ctx.disk,
+            working_dir=str(ctx.disk.project_path),
+        )
+        persona_prompt = ctx.personas.load_or_default("coach").system_prompt
 
-    # Determine the current slice from state (default to S01 on first run)
-    slice_id = ctx.state.current_slice or "S01"
+        # Determine the current slice from state (default to S01 on first run)
+        slice_id = ctx.state.current_slice or "S01"
 
-    result = await player.run(
-        trigger=trigger.value,
-        persona_prompt=persona_prompt,
-        slice_id=slice_id,
-        milestone_path=ctx.milestone_path,
-    )
+        result = await player.run(
+            trigger=trigger.value,
+            persona_prompt=persona_prompt,
+            slice_id=slice_id,
+            milestone_path=ctx.milestone_path,
+        )
+    except Exception as exc:
+        log.warning("coach: player.run() raised: %s — returning failure", exc)
+        return PhaseResult(success=False, error=str(exc))
 
     if result.success:
         log.info(

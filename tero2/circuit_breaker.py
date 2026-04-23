@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 from tero2.constants import CB_FAILURE_THRESHOLD, CB_RECOVERY_TIMEOUT_S
@@ -24,45 +25,53 @@ class CircuitBreaker:
     state: CBState = CBState.CLOSED
     failure_count: int = 0
     last_failure_time: float = 0.0
+    last_half_open_failure_time: float = 0.0
     _trial_in_progress: bool = False
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def check(self) -> None:
-        if self.state == CBState.CLOSED:
-            return
-        if self.state == CBState.OPEN:
-            if time.monotonic() - self.last_failure_time >= self.recovery_timeout_s:
-                self.state = CBState.HALF_OPEN
-                self._trial_in_progress = True  # this call IS the trial
+        with self._lock:
+            if self.state == CBState.CLOSED:
                 return
-            raise CircuitOpenError(self.name)
-        if self.state == CBState.HALF_OPEN:
-            if self._trial_in_progress:
-                # Allow a new probe only when recovery_timeout_s > 0 and the
-                # timeout has elapsed again since last_failure_time (abandoned
-                # trial case). When recovery_timeout_s == 0, block immediately
-                # so only one probe is allowed per HALF_OPEN window.
-                if (
-                    self.recovery_timeout_s > 0
-                    and time.monotonic() - self.last_failure_time > self.recovery_timeout_s
-                ):
-                    self._trial_in_progress = False
-                else:
-                    raise CircuitOpenError(self.name)
-            self._trial_in_progress = True
-            self.last_failure_time = time.monotonic()
-            return
+            if self.state == CBState.OPEN:
+                now = time.time()
+                if now - self.last_failure_time >= self.recovery_timeout_s:
+                    # Bug 256: with recovery_timeout_s=0, block re-probe after HALF_OPEN failure
+                    if self.recovery_timeout_s == 0 and self.last_half_open_failure_time > 0:
+                        raise CircuitOpenError(self.name)
+                    self.state = CBState.HALF_OPEN
+                    self._trial_in_progress = True
+                    return
+                raise CircuitOpenError(self.name)
+            if self.state == CBState.HALF_OPEN:
+                if self._trial_in_progress:
+                    if (
+                        self.recovery_timeout_s > 0
+                        and time.time() - self.last_failure_time > self.recovery_timeout_s
+                    ):
+                        self._trial_in_progress = False
+                    else:
+                        raise CircuitOpenError(self.name)
+                self._trial_in_progress = True
+                self.last_failure_time = time.time()
+                return
 
     def record_success(self) -> None:
-        self.failure_count = 0
-        self.state = CBState.CLOSED
-        self._trial_in_progress = False
+        with self._lock:
+            self.failure_count = 0
+            self.state = CBState.CLOSED
+            self._trial_in_progress = False
+            self.last_half_open_failure_time = 0.0
 
     def record_failure(self) -> None:
-        self.failure_count += 1
-        self.last_failure_time = time.monotonic()
-        if self.state == CBState.HALF_OPEN or self.failure_count >= self.failure_threshold:
-            self.state = CBState.OPEN
-            self._trial_in_progress = False
+        with self._lock:
+            self.failure_count += 1
+            self.last_failure_time = time.time()
+            if self.state == CBState.HALF_OPEN or self.failure_count >= self.failure_threshold:
+                if self.state == CBState.HALF_OPEN:
+                    self.last_half_open_failure_time = time.time()
+                self.state = CBState.OPEN
+                self._trial_in_progress = False
 
     @property
     def is_available(self) -> bool:

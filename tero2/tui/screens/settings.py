@@ -141,9 +141,17 @@ class SettingsScreen(ModalScreen[None]):
             return  # tab not rendered — skip section
         sora_data: dict = {}
         if max_slices_in.value.isdigit():
-            sora_data["max_slices"] = int(max_slices_in.value)
+            n = int(max_slices_in.value)
+            if 1 <= n <= 10_000:
+                sora_data["max_slices"] = n
+            else:
+                self.notify(f"max_slices must be between 1 and 10000 (got {n})", severity="warning")
         if idle_in.value.isdigit():
-            sora_data["idle_timeout_s"] = int(idle_in.value)
+            n = int(idle_in.value)
+            if 0 <= n <= 86400:
+                sora_data["idle_timeout_s"] = n
+            else:
+                self.notify(f"idle_timeout_s must be between 0 and 86400 (got {n})", severity="warning")
         if sora_data:
             write_global_config_section(self._config_path, "sora", sora_data)
 

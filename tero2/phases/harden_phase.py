@@ -24,6 +24,7 @@ import re
 from tero2.context_assembly import ContextAssembler
 from tero2.phases.context import PhaseResult, RunnerContext
 from tero2.players.reviewer import ReviewerPlayer
+from tero2.state import SoraPhase
 
 log = logging.getLogger(__name__)
 
@@ -140,11 +141,17 @@ async def run_harden(ctx: RunnerContext) -> PhaseResult:
         if fix_result.fixed_plan:
             current_plan = fix_result.fixed_plan
 
-        # Write intermediate version for debugging / recovery
-        try:
-            ctx.disk.write_file(f"{ctx.milestone_path}/plan_v{round_num}.md", current_plan)
-        except OSError as e:
-            log.warning("harden: intermediate write failed (non-fatal): %s", e)
+        # Write intermediate version for debugging / recovery. disk.write_file
+        # returns False on OSError — log loudly so operators notice data loss.
+        ok = ctx.disk.write_file(
+            f"{ctx.milestone_path}/plan_v{round_num}.md", current_plan
+        )
+        if not ok:
+            log.error(
+                "harden: intermediate write FAILED for plan_v%d.md — "
+                "data loss; recovery from this round will not be possible",
+                round_num,
+            )
         if debug:
             log.info(
                 "harden round %d: applied fixes, plan is %d chars", round_num, len(current_plan)
@@ -157,6 +164,10 @@ async def run_harden(ctx: RunnerContext) -> PhaseResult:
         log.error("harden: failed to write PLAN.md: %s", e)
         return PhaseResult(success=False, error=f"PLAN.md write failed: {e}")
     log.info("harden complete — PLAN.md written (%d chars)", len(current_plan))
+    # Bug 264: advance state.sora_phase = SoraPhase.SCOUT so crash recovery
+    # does not re-enter HARDENING and waste another reviewer pass.
+    if ctx.checkpoint is not None:
+        ctx.state = ctx.checkpoint.set_sora_phase(ctx.state, SoraPhase.SCOUT)
     return PhaseResult(success=True, data=current_plan)
 
 

@@ -47,8 +47,16 @@ _MODEL_CONTEXT_WINDOWS: dict[str, int] = {
 def get_model_context_limit(model: str) -> int:
     """Return context window size for a model string. Default: 128_000."""
     model_lower = model.lower()
+    # Use word-boundary matching: split on '/' and '-' to avoid false positives
+    # e.g. 'deepmind-v2' should not match 'deepseek', 'mimo', etc.
+    parts = set(model_lower.replace("/", "-").split("-"))
     for key, limit in _MODEL_CONTEXT_WINDOWS.items():
-        if key in model_lower:
+        key_parts = set(key.replace("/", "-").split("-"))
+        if key_parts == parts or key_parts.issubset(parts) and key == model_lower.split("/")[-1].split("-")[0]:
+            return limit
+    # Fallback: check if model starts with the key (exact prefix match)
+    for key, limit in _MODEL_CONTEXT_WINDOWS.items():
+        if model_lower == key or model_lower.startswith(key + "-") or model_lower.startswith(key + "/"):
             return limit
     return 128_000
 
@@ -60,11 +68,13 @@ class ProviderChain:
         cb_registry: CircuitBreakerRegistry | None = None,
         rate_limit_max_retries: int = RATE_LIMIT_MAX_RETRIES,
         rate_limit_wait_s: float = RATE_LIMIT_WAIT_S,
+        rate_limit_max_wait_s: float = 300.0,
     ) -> None:
         self.providers = providers
         self.cb_registry = cb_registry or CircuitBreakerRegistry()
         self._rate_limit_max_retries = rate_limit_max_retries
         self._rate_limit_wait_s = rate_limit_wait_s
+        self._rate_limit_max_wait_s = rate_limit_max_wait_s
         self._current_provider_index: int = 0
 
     @property
@@ -99,7 +109,7 @@ class ProviderChain:
                 if attempt > 0:
                     wait = min(
                         self._rate_limit_wait_s * (2.0 ** (attempt - 1)),
-                        300.0,
+                        self._rate_limit_max_wait_s,
                     )
                     jitter = random.uniform(0, self._rate_limit_wait_s * 0.1)
                     await asyncio.sleep(wait + jitter)
@@ -150,16 +160,25 @@ class ProviderChain:
                         )
                         cb.record_failure()
                         raise
+                    # Mid-stream recoverable failure is a hard-fail:
+                    # - no retry (provider already committed partial output)
+                    # - no yield of buffered messages (would double-count
+                    #   downstream on any outer retry loop)
+                    # - no fallback to next provider (partial output already
+                    #   delivered-but-incomplete semantics are provider-specific)
+                    # Intentional: do not yield msg_buffer here. The caller
+                    # treats the raised exception as authoritative.
                     if buffered_any:
                         log.error(
-                            "provider %s failed mid-stream after yielding: %s: %s",
+                            "provider %s failed mid-stream after yielding "
+                            "%d msgs: %s: %s",
                             provider.display_name,
+                            len(msg_buffer),
                             type(exc).__name__,
                             exc,
                         )
                         cb.record_failure()
                         raise
-                    # Recoverable and nothing buffered yet: retry this provider.
                     if attempt >= self._rate_limit_max_retries:
                         # Exhausted retries for this provider — record failure,
                         # then try next provider in the outer loop.

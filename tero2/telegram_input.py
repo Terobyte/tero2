@@ -49,11 +49,21 @@ class TelegramInputBot:
     def __init__(self, config: Config) -> None:
         self.config = config
         self.notifier = Notifier(config.telegram)
-        self._allowed_ids: set[str] = set(config.telegram.allowed_chat_ids)
+        self._allowed_ids: set[str] = {str(x) for x in config.telegram.allowed_chat_ids}
         self._plan_queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
         self._running = False
         self._paused = False
         self._watcher_tasks: set[asyncio.Task] = set()
+        # Offset persistence: save/load getUpdates offset to disk so restarts
+        # don't reprocess old messages (Bug 217).
+        self._offset_file: Path | None = None
+        try:
+            import tempfile
+            self._offset_file = Path(tempfile.gettempdir()) / "tero2_telegram_offset"
+        except (ImportError, OSError):
+            # ImportError: stdlib missing (extremely unusual); OSError: tempdir
+            # unreadable. Either way, offset persistence is best-effort.
+            self._offset_file = None
         # Queue holds (project_name, plan_content) tuples.
         # Polling loop enqueues; a separate consumer coroutine dequeues and processes.
         # This prevents the race where two rapid messages both try to acquire the lock:
@@ -77,17 +87,49 @@ class TelegramInputBot:
         self._running = False
         self._paused = False
         self._plan_queue = asyncio.Queue()
+        for task in list(self._watcher_tasks):
+            task.cancel()
+        self._watcher_tasks.clear()
+
+    def _load_offset(self) -> int:
+        """Load persisted offset from disk."""
+        try:
+            if self._offset_file and self._offset_file.exists():
+                return int(self._offset_file.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError, UnicodeDecodeError):
+            # OSError: file unreadable; ValueError: int() cast fails on non-numeric;
+            # UnicodeDecodeError: file has non-utf-8 bytes. All recover to offset 0.
+            log.debug("telegram offset file unreadable, starting from 0", exc_info=True)
+        return 0
+
+    def _save_offset(self, offset: int) -> None:
+        """Persist offset to disk."""
+        try:
+            if self._offset_file:
+                self._offset_file.write_text(str(offset), encoding="utf-8")
+        except OSError:
+            # Disk full / read-only fs / permission denied. Offset is best-effort
+            # — failing to persist just re-processes a few messages on restart.
+            log.debug("telegram offset save failed", exc_info=True)
 
     async def _poll_loop(self) -> None:
         """Long-poll getUpdates and dispatch messages."""
-        offset = 0
+        offset = self._load_offset()
         while self._running:
             try:
                 updates, offset = await self._poll_once(offset)
+                if updates:
+                    self._save_offset(offset)
                 for update in updates:
                     await self._handle_update(update)
+            except asyncio.CancelledError:
+                raise
             except Exception:
-                log.error("poll loop error", exc_info=True)
+                # Blanket: this is the top-level polling loop. It must not die
+                # on transient errors (network blips, malformed updates, a bug
+                # in a handler) — a crash here kills the bot until restart.
+                # log.exception so the stack trace makes the failure debuggable.
+                log.exception("poll loop error — backing off 5s before retry")
                 await asyncio.sleep(5)
 
     async def _poll_once(self, offset: int) -> tuple[list[dict], int]:
@@ -109,7 +151,9 @@ class TelegramInputBot:
             return [], offset
         try:
             data = resp.json()
-        except Exception:
+        except ValueError:
+            # requests raises requests.exceptions.JSONDecodeError (ValueError
+            # subclass in modern requests / json.JSONDecodeError in older).
             log.warning("poll_once: failed to decode JSON response, skipping")
             return [], offset
         updates = data.get("result", [])
@@ -159,6 +203,9 @@ class TelegramInputBot:
     async def _handle_plan(self, plan_content: str, chat_id: str) -> None:
         """Handle an incoming plan: extract name, enqueue for processing."""
         project_name = _extract_project_name(plan_content)
+        # Reject any residual path traversal (..) or separators after sanitization
+        if ".." in project_name or "/" in project_name or "\\" in project_name:
+            project_name = "untitled-project"
         await self._plan_queue.put((project_name, plan_content))
         await self.notifier.send(
             f"Plan received -- queued as '{project_name}'",
@@ -183,7 +230,7 @@ class TelegramInputBot:
             )
         elif command == "/stop":
             await self.notifier.send("Stopping bot...", NotifyLevel.PROGRESS)
-            self._running = False
+            await self.stop()
         elif command == "/pause":
             self._paused = True
             await self.notifier.send(
@@ -250,8 +297,17 @@ class TelegramInputBot:
                     f"project '{project_name}' already exists -- skipping",
                     NotifyLevel.ERROR,
                 )
+            except asyncio.CancelledError:
+                # Queue wait was cancelled (stop() fired). Re-raise so the
+                # consumer task exits cleanly; don't mark task_done because
+                # the plan was already dequeued and cancellation trumps it.
+                raise
             except Exception as exc:
-                log.error(f"failed to process plan '{project_name}': {exc}")
+                # Blanket: consumer must stay alive for the next plan. init_project
+                # and _launch_runner touch disk+subprocess; many failure modes
+                # (OSError, subprocess errors, config errors) collapse to "skip
+                # this plan, log, and tell the user".
+                log.exception("failed to process plan '%s'", project_name)
                 await self.notifier.send(
                     f"failed to start '{project_name}': {exc}",
                     NotifyLevel.ERROR,
@@ -312,8 +368,19 @@ class TelegramInputBot:
                             chunk = await proc.stderr.read(4096)
                             if not chunk:
                                 break
-                    except Exception:
-                        pass
+                    except asyncio.CancelledError:
+                        raise
+                    except (OSError, ValueError):
+                        # OSError: pipe closed / broken. ValueError: read on
+                        # closed transport. Give up draining; caller will exit.
+                        log.debug("stderr drain aborted", exc_info=True)
+                    # Wait for process to exit after draining stderr.
+                    try:
+                        await proc.wait()
+                    except asyncio.CancelledError:
+                        raise
+                    except (OSError, ProcessLookupError):
+                        log.debug("proc.wait failed after drain", exc_info=True)
                 drain_task = asyncio.create_task(_drain_stderr())
                 drain_task.add_done_callback(
                     lambda t: log.warning("stderr drain failed: %s", t.exception())
@@ -363,8 +430,15 @@ class TelegramInputBot:
             if resp.status_code == 200:
                 return resp.content.decode('utf-8', errors='replace')
             return None
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            log.error("file download failed", exc_info=True)
+            # Blanket: this is defensive — a malformed Telegram response or
+            # unexpected 3rd-party behaviour must not crash the bot, which
+            # would drop the user's file silently. Covers requests errors,
+            # OSError, ValueError (json), AttributeError (bad mock/shape).
+            # Logged with exc_info so the failure is debuggable.
+            log.exception("file download failed")
             return None
 
 

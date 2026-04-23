@@ -106,6 +106,7 @@ class KiloNormalizer:
                 content = " ".join(
                     item.get("text", "") if isinstance(item, dict) else str(item)
                     for item in content
+                    if item is not None
                 )
             yield StreamEvent(
                 role=role, kind="tool_result", timestamp=ts,

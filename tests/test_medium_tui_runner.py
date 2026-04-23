@@ -111,13 +111,15 @@ def test_a16_role_swap_on_model_cancel_dismisses_screen():
     app_mock = MagicMock()
     screen.app = app_mock
 
-    def _on_model(entry) -> None:  # exact copy from role_swap.py
+    # Mirror the real _on_model in tero2/tui/screens/role_swap.py —
+    # the else branch must navigate back (calls _enter_step2) so the
+    # screen doesn't freeze when the user cancels model selection.
+    def _on_model(entry) -> None:
         if entry is not None and screen._selected_role:
-            screen.app.post_message(
-                MagicMock()
-            )
+            screen.app.post_message(MagicMock())
             screen.dismiss(None)
-        # BUG: no else branch
+        else:
+            screen._enter_step2()
 
     _on_model(None)  # simulate user cancelling model selection
 

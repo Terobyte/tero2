@@ -57,10 +57,14 @@ async def run_scout(ctx: RunnerContext) -> PhaseResult:
     player = ScoutPlayer(chain, ctx.disk, working_dir=working_dir)
     persona_prompt = ctx.personas.load_or_default("scout").system_prompt
 
-    result = await player.run(
-        milestone_path=ctx.milestone_path,
-        persona_prompt=persona_prompt,
-    )
+    try:
+        result = await player.run(
+            milestone_path=ctx.milestone_path,
+            persona_prompt=persona_prompt,
+        )
+    except Exception as exc:
+        log.warning("scout: player.run() raised: %s — returning failure", exc)
+        return PhaseResult(success=False, error=str(exc))
 
     if result.success:
         log.info(

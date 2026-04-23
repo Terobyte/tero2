@@ -165,6 +165,18 @@ class AgentState:
             # guard in __setattr__ — from_json must faithfully restore any terminal
             # state (e.g. Phase.COMPLETED) that was persisted to disk.
             import dataclasses
+            # Bug 221: validate that numeric fields carry numeric types.
+            _int_fields = {
+                "retry_count", "steps_in_task", "tool_repeat_count",
+                "provider_index", "escalation_level", "current_task_index",
+                "div_steps",
+            }
+            for _fname in _int_fields:
+                if _fname in d and not isinstance(d[_fname], int):
+                    raise ValueError(
+                        f"AgentState.from_json: field {_fname!r} must be int, "
+                        f"got {type(d[_fname]).__name__!r}: {d[_fname]!r}"
+                    )
             instance = object.__new__(cls)
             for f in dataclasses.fields(cls):
                 val = d.get(f.name, dataclasses.MISSING)
@@ -205,7 +217,12 @@ class AgentState:
         try:
             os.replace(tmp, path)
         except OSError:
-            tmp.unlink(missing_ok=True)
+            # Bug 293: wrap unlink in its own try/except so a failing unlink
+            # does not mask the original replace exception.
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                log.warning("AgentState.save: could not clean up tmp file %s", tmp)
             raise
         # Remember the last save path so touch() can persist without a path arg.
         # Uses object.__setattr__ to bypass the phase-guard __setattr__ and to

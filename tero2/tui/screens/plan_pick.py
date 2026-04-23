@@ -84,19 +84,28 @@ class PlanPickScreen(ModalScreen[Path | None]):
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
     def on_mount(self) -> None:
-        if not self._files:
-            self.call_after_refresh(self._auto_idle)
+        # Kick off an async refresh to reload files if the initial scan
+        # returned nothing. The async worker is responsible for dismissal;
+        # don't schedule a second parallel dismissal here — two dismisses
+        # race and the second raises ScreenStackError.
+        self.run_worker(self._load_files(), exclusive=True)
 
     def _auto_idle(self) -> None:
         self.dismiss(None)
 
     async def _load_files(self) -> None:
-        """Async loader: if no files found, dismiss via call_from_thread for thread safety."""
+        """Async loader: if no files found, dismiss from the event loop.
+
+        The worker is launched via ``run_worker`` which runs the coroutine
+        on the app's event loop. After ``asyncio.to_thread`` resumes we
+        are back on the app thread, so ``call_from_thread`` would raise
+        "must run in a different thread" — just call ``dismiss`` directly.
+        """
         import asyncio
         self._files = await asyncio.to_thread(self._scan_md_files)
         if not self._files:
             if self.is_attached:
-                self.app.call_from_thread(self.dismiss, None)
+                self.dismiss(None)
             return
 
     # ── event handlers ───────────────────────────────────────────────────────

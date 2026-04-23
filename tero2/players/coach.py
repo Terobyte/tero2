@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from tero2.disk_layer import DiskLayer
+from tero2.errors import ProviderError, RateLimitError
 from tero2.players.base import BasePlayer, PlayerResult
 from tero2.providers.chain import ProviderChain
 
@@ -86,7 +87,7 @@ class CoachPlayer(BasePlayer):
             # strategy document. A successful parse with zero sections means
             # nothing was applied, so the operator's directive must survive
             # for the next attempt.
-            wrote_any = any([strategy, task_queue, risk, context_hints])
+            wrote_any = all([strategy, task_queue, risk, context_hints])
             if wrote_any and self.disk.read_steer():
                 self.disk.clear_steer()
 
@@ -99,6 +100,8 @@ class CoachPlayer(BasePlayer):
                 risk=risk,
                 context_hints=context_hints,
             )
+        except (ProviderError, RateLimitError):
+            raise
         except Exception as exc:
             log.error("coach failed (trigger=%s): %s", trigger, exc)
             return CoachResult(success=False, error=str(exc))
@@ -135,6 +138,10 @@ class CoachPlayer(BasePlayer):
                 if content:
                     entry = f"### {sid}/{tid}\n{content}"
                     if total_size + len(entry) > _SIZE_CAP:
+                        log.warning(
+                            "coach: truncating task summaries at _SIZE_CAP, %d chars dropped",
+                            len(entry),
+                        )
                         summaries.append("[TRUNCATED — context limit reached]")
                         break
                     summaries.append(entry)
@@ -193,11 +200,11 @@ def _parse_sections(output: str) -> dict[str, str]:
     result: dict[str, str] = {}
     pattern = re.compile(
         r"^##\s+(" + "|".join(_SECTIONS) + r")\s*$",
-        re.MULTILINE,
+        re.MULTILINE | re.IGNORECASE,
     )
     matches = list(pattern.finditer(output))
     for i, match in enumerate(matches):
-        section_name = match.group(1)
+        section_name = match.group(1).upper()
         start = match.end()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(output)
         chunk = output[start:end].strip()
@@ -205,6 +212,15 @@ def _parse_sections(output: str) -> dict[str, str]:
             result[section_name] = result[section_name] + "\n\n" + chunk
         else:
             result[section_name] = chunk
+
+    # Warn about any ## headers that were not recognized section names.
+    unrecognized = re.compile(r"^##\s+(\S[^\n]*?)\s*$", re.MULTILINE)
+    sections_upper = {m.upper() for m in _SECTIONS}
+    for m in unrecognized.finditer(output):
+        header = m.group(1).strip().upper()
+        if header not in sections_upper:
+            log.warning("coach: unrecognized section header: %r", m.group(1).strip())
+
     return result
 
 

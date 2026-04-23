@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
@@ -244,9 +245,11 @@ class RunnerContext:
             log.error("agent error: %s", exc)
             return False, "\n".join(captured_parts)
         finally:
-            self._heartbeat_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._heartbeat_task
+            task = getattr(self, "_heartbeat_task", None)
+            if task is not None:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
 
     # ── Internal helpers ──────────────────────────────────────────────────
 
@@ -275,26 +278,49 @@ def _read_next_slice(ctx: RunnerContext) -> str | None:
 
     The ``[~]`` marker prevents the same slice from being double-claimed
     on crash recovery or concurrent reads.
+
+    The read-modify-write sequence is serialized via an exclusive
+    ``fcntl.flock`` on a dedicated lock file so two concurrent runners
+    cannot claim the same slice (bug 173 TOCTOU).
     """
+    import fcntl
     import re
 
-    content = ctx.disk.read_file("strategic/TASK_QUEUE.md")
-    if not content:
+    queue_path = ctx.disk.sora_dir / "strategic" / "TASK_QUEUE.md"
+    lock_path = queue_path.with_suffix(".claim.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+    lock_fd: int | None = None
+    try:
+        lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+
+        content = ctx.disk.read_file("strategic/TASK_QUEUE.md")
+        if not content:
+            return None
+
+        lines = content.splitlines(keepends=True)
+        for i, line in enumerate(lines):
+            if "[ ]" not in line:
+                continue
+            m = re.search(r"\bS\d+\b", line)
+            if not m:
+                continue
+            slice_id = m.group(0)
+            lines[i] = line.replace("[ ]", "[~]", 1)
+            # Atomic write: disk.write_file already does a tmp+replace
+            # under the hood, but the flock guarantees this entire
+            # read-modify-write is serialized against other runners.
+            ctx.disk.write_file("strategic/TASK_QUEUE.md", "".join(lines))
+            return slice_id
+
         return None
-
-    lines = content.splitlines(keepends=True)
-    for i, line in enumerate(lines):
-        if "[ ]" not in line:
-            continue
-        m = re.search(r"\bS\d+\b", line)
-        if not m:
-            continue
-        slice_id = m.group(0)
-        lines[i] = line.replace("[ ]", "[~]", 1)
-        ctx.disk.write_file("strategic/TASK_QUEUE.md", "".join(lines))
-        return slice_id
-
-    return None
+    finally:
+        if lock_fd is not None:
+            with suppress(OSError):
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            with suppress(OSError):
+                os.close(lock_fd)
 
 
 def _load_slice_plan_from_disk(ctx: RunnerContext, slice_id: str) -> SlicePlan:

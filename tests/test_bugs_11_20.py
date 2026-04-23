@@ -85,26 +85,26 @@ class TestBug11OffByOneToolRepeatThreshold:
             f"`count >= threshold` -> `1 >= 2` -> False."
         )
 
-    def test_update_tool_hash_fires_on_second_repeat(self):
+    def test_update_tool_hash_fires_after_threshold_repeats(self):
         config = StuckDetectionConfig(tool_repeat_threshold=2)
         state = AgentState()
         state, _ = update_tool_hash(state, "same_tool_call")
         state, _ = update_tool_hash(state, "same_tool_call")
-        assert state.tool_repeat_count == 1
+        state, _ = update_tool_hash(state, "same_tool_call")
+        assert state.tool_repeat_count == 2
         result = check_stuck(state, config)
         assert result.signal == StuckSignal.TOOL_REPEAT, (
-            f"After 2 identical tool calls, tool_repeat_count=1 with "
-            f"threshold=2. check_stuck should fire via `1 >= 2-1` "
-            f"(fires after N identical calls where N=threshold)."
+            f"After tool_repeat_count reaches threshold ({config.tool_repeat_threshold}), "
+            f"check_stuck should fire via `count >= threshold`."
         )
 
-    def test_source_uses_threshold_minus_one(self):
+    def test_source_does_not_use_off_by_one(self):
         source = inspect.getsource(check_stuck)
         tool_section = source[source.index("tool_repeat_count") :]
         tool_section = tool_section[: tool_section.index("\n\n")]
-        assert "tool_repeat_count >= config.tool_repeat_threshold - 1" in tool_section, (
-            "check_stuck should use `>= threshold - 1` so that threshold=2 "
-            "fires after 2 identical calls (count=1), not 3."
+        assert "tool_repeat_threshold - 1" not in tool_section, (
+            "check_stuck must NOT subtract 1 from tool_repeat_threshold "
+            "(bug 11 / bug 156 regression)."
         )
 
 

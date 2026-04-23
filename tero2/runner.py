@@ -359,6 +359,7 @@ class Runner:
                     "runner: skip_task requested — current attempt will finish, "
                     "then execute_phase advances to the next task"
                 )
+                self._skip_current_task = False  # reset after forwarding to ctx
                 continue
             if cmd.kind == "new_plan":
                 # User picked a new plan via TUI PlanPickScreen mid-execution.
@@ -475,11 +476,14 @@ class Runner:
                         return
                     if action.level == EscalationLevel.DIVERSIFICATION:
                         ctx.div_steps += 1
+                        state.div_steps = ctx.div_steps
                     elif action.level == EscalationLevel.BACKTRACK_COACH:
                         ctx.div_steps = 0
+                        state.div_steps = ctx.div_steps
                     inject_prompt = action.inject_prompt
                 else:
                     ctx.escalation_level = EscalationLevel.NONE
+                    ctx.div_steps = 0
 
             if attempt > 0:
                 wait = min(
@@ -630,6 +634,13 @@ class Runner:
                 raise FileNotFoundError(
                     f"plan file not found: {self.plan_file}"
                 ) from exc
+            except UnicodeDecodeError as exc:
+                # Disease 1: a non-UTF-8 plan file would crash the phase with
+                # a bare ValueError. Surface it as a structured file error so
+                # the caller can notify and exit cleanly.
+                raise ValueError(
+                    f"plan file {self.plan_file} is not valid UTF-8: {exc}"
+                ) from exc
             roadmap_path = f"{ctx.milestone_path}/ROADMAP.md"
             ctx.disk.write_file(roadmap_path, plan_content)
 
@@ -638,6 +649,7 @@ class Runner:
         ):
             state = self.checkpoint.set_sora_phase(state, SoraPhase.HARDENING)
             self._current_state = state
+            ctx.state = state
             await self._emit_phase(SoraPhase.HARDENING)
             state, cont = await self._drain_commands(state)
             if not cont:
@@ -654,6 +666,7 @@ class Runner:
         ):
             state = self.checkpoint.set_sora_phase(state, SoraPhase.SCOUT)
             self._current_state = state
+            ctx.state = state
             await self._emit_phase(SoraPhase.SCOUT)
             state, cont = await self._drain_commands(state)
             if not cont:
@@ -668,6 +681,7 @@ class Runner:
         ):
             state = self.checkpoint.set_sora_phase(state, SoraPhase.COACH)
             self._current_state = state
+            ctx.state = state
             await self._emit_phase(SoraPhase.COACH)
             state, cont = await self._drain_commands(state)
             if not cont:
@@ -683,6 +697,7 @@ class Runner:
         if not _phase_already_done(state.sora_phase, SoraPhase.ARCHITECT):
             state = self.checkpoint.set_sora_phase(state, SoraPhase.ARCHITECT)
             self._current_state = state
+            ctx.state = state
             await self._emit_phase(SoraPhase.ARCHITECT)
             state, cont = await self._drain_commands(state)
             if not cont:
@@ -706,6 +721,7 @@ class Runner:
         if not execute_already_done:
             state = self.checkpoint.set_sora_phase(state, SoraPhase.EXECUTE)
             self._current_state = state
+            ctx.state = state
             await self._emit_phase(SoraPhase.EXECUTE)
             state, cont = await self._drain_commands(state)
             if not cont:
@@ -726,10 +742,14 @@ class Runner:
         while extra_slices_done < max_slices - 1:
             state = self.checkpoint.set_sora_phase(state, SoraPhase.SLICE_DONE)
             self._current_state = state
+            ctx.state = state
             await self._emit_phase(SoraPhase.SLICE_DONE)
 
             if "coach" in self.config.roles:
                 await run_coach(ctx, CoachTrigger.END_OF_SLICE)
+                # Bug 275: honor shutdown signals received during coach.
+                if shutdown_event and shutdown_event.is_set():
+                    return
 
             next_slice = _read_next_slice(ctx)
             if next_slice is None:
@@ -745,6 +765,7 @@ class Runner:
 
             state = self.checkpoint.set_sora_phase(state, SoraPhase.ARCHITECT)
             self._current_state = state
+            ctx.state = state
             await self._emit_phase(SoraPhase.ARCHITECT)
             state, cont = await self._drain_commands(state)
             if not cont:
@@ -763,6 +784,7 @@ class Runner:
 
             state = self.checkpoint.set_sora_phase(state, SoraPhase.EXECUTE)
             self._current_state = state
+            ctx.state = state
             await self._emit_phase(SoraPhase.EXECUTE)
             state, cont = await self._drain_commands(state)
             if not cont:
@@ -952,9 +974,9 @@ class Runner:
         if self._RE_STOP.search(content):
             self._current_state = self.checkpoint.mark_failed(state, "STOP directive in OVERRIDE.md")
             object.__setattr__(state, "phase", self._current_state.phase)
-            return self._current_state
+            return state
         if self._RE_PAUSE.search(content) and state.phase != Phase.PAUSED:
             self._current_state = self.checkpoint.mark_paused(state, "PAUSE directive in OVERRIDE.md")
             object.__setattr__(state, "phase", self._current_state.phase)
-            return self._current_state
+            return state
         return state

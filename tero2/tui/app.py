@@ -107,9 +107,11 @@ class DashboardApp(App):
                 usage_panel = self.query_one("#usage-panel", UsagePanel)
                 stuck_hint = self.query_one("#stuck-hint", StuckHintWidget)
             except NoMatches:
+                log.warning("_consume_events: widgets not yet mounted, dropping event %r", event)
                 continue
 
-            # route by event kind
+            # route by event kind — use call_from_thread when calling from a
+            # non-DOM thread; this worker runs in the event loop (same thread)
             try:
                 if event.kind == "phase_change":
                     sora_phase_val = event.data.get("sora_phase", SoraPhase.NONE.value)
@@ -141,9 +143,7 @@ class DashboardApp(App):
                 elif event.kind == "provider_switch":
                     role = event.role or event.data.get("role", "")
                     provider = event.data.get("provider", "")
-                    log_view.push_message(
-                        f"Провайдер изменён: {role} → {provider}", style="cyan"
-                    )
+                    log_view.push_message(f"Провайдер изменён: {role} → {provider}", style="cyan")
 
                 elif event.kind == "usage_update":
                     usage_panel.update_limits(event.data.get("limits", {}))
@@ -279,13 +279,17 @@ class DashboardApp(App):
     # ── worker state ─────────────────────────────────────────────────────────
 
     def on_worker_state_changed(self, event) -> None:  # type: ignore[override]
+        worker = self._runner_worker
         if (
-            self._runner_worker is not None
-            and event.worker is self._runner_worker
+            worker is not None
+            and event.worker is worker
             and event.state == WorkerState.ERROR
         ):
-            log_view = self.query_one("#log-view", LogView)
-            log_view.push_message("Критическая ошибка: runner завершился с ошибкой.", style="red bold")
+            try:
+                log_view = self.query_one("#log-view", LogView)
+                log_view.push_message("Критическая ошибка: runner завершился с ошибкой.", style="red bold")
+            except NoMatches:
+                log.warning("on_worker_state_changed: log-view not mounted")
 
     # ── responsive layout ────────────────────────────────────────────────────
 
@@ -305,7 +309,7 @@ class DashboardApp(App):
             panel = self.query_one(StreamPanel)
             panel.toggle_raw()
         except NoMatches:
-            pass
+            log.warning("action_toggle_raw: StreamPanel not mounted")
 
     def action_clear_stream(self) -> None:
         try:
@@ -313,7 +317,7 @@ class DashboardApp(App):
             panel = self.query_one(StreamPanel)
             panel.clear()
         except NoMatches:
-            pass
+            log.warning("action_clear_stream: StreamPanel not mounted")
 
     def action_unpin(self) -> None:
         try:
@@ -321,4 +325,8 @@ class DashboardApp(App):
             panel = self.query_one(StreamPanel)
             panel.unpin()
         except NoMatches:
-            pass
+            log.warning("action_unpin: StreamPanel not mounted")
+
+
+# Alias for backward compatibility and test imports.
+TeroApp = DashboardApp

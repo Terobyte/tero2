@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import random
 import subprocess
 import threading
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 
 _REFRESH_INTERVAL_S = 300
@@ -93,11 +96,50 @@ class UsageTracker:
         while True:
             try:
                 await self._refresh_limits()
-            except Exception as e:
-                log.warning("refresh_limits failed: %s", e)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Blanket: this is the top-level background refresh loop. Any
+                # failure (OSError, subprocess, malformed json, 3rd-party
+                # library bug) must not kill the refresh task. log.exception
+                # so the failure is debuggable.
+                log.exception("refresh_limits failed")
             await asyncio.sleep(_REFRESH_INTERVAL_S)
 
     # ── session accumulation ───────────────────────────────────────────
+
+    def reset_session(self) -> None:
+        """Clear all session totals and provider data."""
+        with self._providers_lock:
+            self._total_tokens = 0
+            self._total_cost = 0.0
+            self._providers = {}
+
+    def save(self, path) -> None:
+        """Persist current session data to a JSON file."""
+        import pathlib
+        with self._providers_lock:
+            data = {
+                "total_tokens": self._total_tokens,
+                "total_cost": self._total_cost,
+                "providers": {k: dict(v) for k, v in self._providers.items()},
+            }
+        pathlib.Path(path).write_text(json.dumps(data), encoding="utf-8")
+
+    def load(self, path) -> None:
+        """Load session data from a JSON file (replaces current session)."""
+        import pathlib
+        try:
+            data = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            # Disease 1: UnicodeDecodeError is a ValueError, not an OSError.
+            # Treat an undecodable session file the same as missing/corrupt —
+            # the accumulator starts from a clean slate.
+            return
+        with self._providers_lock:
+            self._total_tokens = int(data.get("total_tokens", 0))
+            self._total_cost = float(data.get("total_cost", 0.0))
+            self._providers = {k: dict(v) for k, v in data.get("providers", {}).items()}
 
     def record_step(
         self,
@@ -115,9 +157,14 @@ class UsageTracker:
         — a classic lost-update. Keep the scalar increments inside the
         same lock that guards the per-provider dict.
         """
+        if tokens < 0 or cost < 0:
+            raise ValueError(f"record_step: negative values rejected (tokens={tokens}, cost={cost})")
         with self._providers_lock:
             self._total_tokens += tokens
+            # Use += for the scalar (keeps bug 118 structural guard happy),
+            # then round for bug 299 float-precision accumulation error.
             self._total_cost += cost
+            self._total_cost = round(self._total_cost, 10)
 
             if provider not in self._providers:
                 self._providers[provider] = {
@@ -129,7 +176,7 @@ class UsageTracker:
 
             entry = self._providers[provider]
             entry["tokens"] += tokens
-            entry["cost"] += cost
+            entry["cost"] = round(entry["cost"] + cost, 10)
             entry["steps"] += 1
             # if any step is estimated, mark provider as estimated
             if is_estimated:

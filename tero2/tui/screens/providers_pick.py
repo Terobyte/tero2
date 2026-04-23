@@ -110,9 +110,10 @@ class ProvidersPickScreen(ModalScreen[bool]):
         # sibling lock file is held via fcntl.flock for the entire cycle so
         # concurrent writers serialise instead of trampling each other's tmp.
         lock_path = config_path.with_suffix(".lock")
-        lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+        lock_fd = None
         tmp_path = config_path.with_suffix(f".{os.getpid()}.tmp")
         try:
+            lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
             fcntl.flock(lock_fd, fcntl.LOCK_EX)
             existing = _load_toml(config_path)
             roles_section = existing.setdefault("roles", {})
@@ -121,8 +122,9 @@ class ProvidersPickScreen(ModalScreen[bool]):
             tmp_path.write_text(_serialize_toml(existing), encoding="utf-8")
             tmp_path.replace(config_path)
         finally:
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)
-            os.close(lock_fd)
+            if lock_fd is not None:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                os.close(lock_fd)
             if tmp_path.exists():
                 tmp_path.unlink(missing_ok=True)
 

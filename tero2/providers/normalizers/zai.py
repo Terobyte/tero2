@@ -116,8 +116,7 @@ class ZaiNormalizer:
             content = _get(raw, "content", "")
             if isinstance(content, list):
                 content = " ".join(
-                    item.get("text", "") if isinstance(item, dict)
-                    else getattr(item, "text", str(item))
+                    _get(item, "text", str(item))
                     for item in content
                 )
             yield StreamEvent(

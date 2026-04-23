@@ -123,7 +123,7 @@ class ArchitectPlayer(BasePlayer):
                             errors = []
                         else:
                             for e in recovered_errors:
-                                log.error("recovered plan also invalid: %s", e)
+                                log.error("recovered plan also invalid (%s): %s", recovered_path, e)
                 if errors:
                     return ArchitectResult(
                         success=False,
@@ -194,7 +194,11 @@ class ArchitectPlayer(BasePlayer):
                 if content:
                     log.info("architect: found plan candidate at %s", path)
                     found.append((str(path), content))
-            except (OSError, FileNotFoundError):
+            except (OSError, FileNotFoundError, UnicodeDecodeError):
+                # Disease 1 (mirror of builder bug 123): UnicodeDecodeError
+                # is a ValueError, not an OSError — a single undecodable
+                # candidate would crash the whole lookup. Skip it like
+                # missing/unreadable candidates.
                 continue
 
         # Prefer the first candidate that passes validation; fall back to the

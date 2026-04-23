@@ -111,11 +111,18 @@ class BuilderPlayer(BasePlayer):
                         task_id=task_id,
                     )
             output_path = f"{milestone_path}/{slice_id}/{task_id}-SUMMARY.md"
-            self.disk.write_file(output_path, summary)
+            wrote_ok = self.disk.write_file(output_path, summary)
+            if not wrote_ok:
+                return BuilderResult(
+                    success=False,
+                    captured_output=output,
+                    error="builder: failed to write summary to disk",
+                    task_id=task_id,
+                )
             return BuilderResult(
                 success=True,
                 output_file=output_path,
-                captured_output=output,
+                captured_output=output or summary,
                 summary=summary,
                 task_id=task_id,
             )
@@ -157,7 +164,7 @@ def _recover_summary_from_disk(task_id: str, working_dir: str) -> str:
     Looks for ``{task_id}-SUMMARY.md`` in the project working directory
     (where agent tool calls land) rather than in ``.sora/``.
     """
-    if not working_dir:
+    if working_dir is None:
         return ""
     base = Path(working_dir)
     candidates = [

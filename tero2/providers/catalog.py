@@ -114,6 +114,14 @@ async def fetch_cli_models(
     except RuntimeError as e:
         log.warning("fetch_cli_models(%s) failed: %s — using static fallback", cli_name, e)
         return STATIC_CATALOG.get(cli_name, [])
+    except (asyncio.CancelledError, GeneratorExit):
+        if proc is not None and proc.returncode is None:
+            try:
+                proc.kill()
+                await proc.wait()
+            except (ProcessLookupError, OSError):
+                pass
+        raise
 
 
 def _cache_path(cli: str) -> Path:
@@ -132,6 +140,8 @@ def _load_cache(cli: str) -> list[ModelEntry] | None:
             return None
         return [ModelEntry(**e) for e in raw["entries"]]
     except (FileNotFoundError, KeyError, json.JSONDecodeError, ValueError):
+        # Note: UnicodeDecodeError subclasses ValueError, so it's covered here.
+        # Treat undecodable cache the same as missing/corrupt — next fetch refreshes.
         return None
 
 

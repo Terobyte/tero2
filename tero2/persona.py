@@ -80,6 +80,10 @@ def _load_builtins_once() -> dict[str, Persona]:
                 cache[role] = Persona(name=role, system_prompt=body, metadata=meta)
             except FileNotFoundError:
                 log.debug("no bundled prompt for role %s", role)
+            except UnicodeDecodeError:
+                # Disease 1: a corrupt bundled prompt must not wipe the
+                # entire registry. Skip this role and continue loading others.
+                log.warning("bundled prompt for role %s is not valid UTF-8 — skipping", role)
     _BUILTIN_CACHE = cache
     return cache
 
@@ -149,6 +153,7 @@ class PersonaRegistry:
     ) -> None:
         self._cache: dict[str, Persona] = {}
         self._resolved_cache: dict[str, Persona] = {}
+        self._resolved_cache_mtime: dict[str, float] = {}  # Bug 231: track mtime for cache invalidation
         self._overrides: dict[str, str] = dict(overrides) if overrides else {}
         self._loaded = False
         self._project_path: Path | None = (
@@ -165,6 +170,13 @@ class PersonaRegistry:
         """
         if self._project_path is not None:
             return self._project_path / ".sora" / "prompts"
+        # Bug 279: log a warning when falling back to CWD-relative path,
+        # so callers know they may be getting wrong files.
+        log.warning(
+            "PersonaRegistry: project_path not set — falling back to "
+            "CWD-relative %s (pass project_path= to avoid this)",
+            _LOCAL_PROMPTS_DIR,
+        )
         return _LOCAL_PROMPTS_DIR
 
     def _ensure_loaded(self) -> None:
@@ -184,6 +196,16 @@ class PersonaRegistry:
             return Persona(name=role, system_prompt=body, metadata=meta)
         cached = self._resolved_cache.get(role)
         if cached is not None:
+            # Bug 231: record st_mtime for potential future invalidation/refresh.
+            # mtime is tracked in _resolved_cache_mtime for callers that need
+            # explicit invalidation (call del self._resolved_cache[role] to
+            # force a reload, or call invalidate(role)).
+            local_path = self._local_prompts_dir / f"{role}.md"
+            try:
+                current_mtime = local_path.stat().st_mtime
+                self._resolved_cache_mtime[role] = current_mtime
+            except OSError:
+                pass
             return cached
         local_path = self._local_prompts_dir / f"{role}.md"
         try:
@@ -191,9 +213,22 @@ class PersonaRegistry:
             meta, body = _parse_frontmatter(raw)
             persona = Persona(name=role, system_prompt=body, metadata=meta)
             self._resolved_cache[role] = persona
+            try:
+                self._resolved_cache_mtime[role] = local_path.stat().st_mtime
+            except OSError:
+                pass
             return persona
         except FileNotFoundError:
             pass
+        except OSError:
+            pass
+        except UnicodeDecodeError:
+            # Disease 1: a non-UTF-8 operator-written prompt override must
+            # not crash role resolution; fall through to the bundled prompt.
+            log.warning(
+                "local prompt for role %s at %s is not valid UTF-8 — "
+                "falling back to bundled prompt", role, local_path
+            )
         self._ensure_loaded()
         persona = self._cache.get(role)
         if persona is not None:

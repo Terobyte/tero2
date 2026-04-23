@@ -124,10 +124,12 @@ class ClaudeNormalizer:
             if isinstance(content, list):
                 parts = []
                 for sub in content:
-                    if isinstance(sub, dict) and sub.get("type") == "text":
+                    if isinstance(sub, dict):
                         parts.append(sub.get("text") or "")
                     else:
-                        parts.append(str(sub))
+                        # Non-dict items (primitives) are treated as empty
+                        # to be consistent with dict-without-"text" → "".
+                        parts.append("")
                 output = "\n".join(parts)
             else:
                 output = str(content) if content is not None else ""

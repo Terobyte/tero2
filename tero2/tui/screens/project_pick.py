@@ -13,6 +13,8 @@ from textual.widgets import Footer, Input, Label, ListItem, ListView, Static
 
 from tero2.history import HistoryEntry, load_history
 
+_MAX_ENTRIES = 50
+
 
 class ProjectPickScreen(ModalScreen[Path | None]):
     """Pick project from history or enter path manually."""
@@ -25,7 +27,7 @@ class ProjectPickScreen(ModalScreen[Path | None]):
 
     def __init__(self) -> None:
         super().__init__()
-        self._entries: list[HistoryEntry] = load_history()
+        self._entries: list[HistoryEntry] = load_history()[:_MAX_ENTRIES]
         self._manual_mode = False
         self._pending_delete: int | None = None
 

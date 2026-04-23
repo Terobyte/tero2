@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import logging
+
 from tero2.constants import MAX_STEPS_PER_TASK
 from tero2.disk_layer import DiskLayer
 from tero2.errors import StateTransitionError
 from tero2.state import AgentState, Phase, SoraPhase
+
+log = logging.getLogger(__name__)
 
 
 _VALID_TRANSITIONS: set[tuple[Phase, Phase]] = {
@@ -50,7 +54,27 @@ class CheckpointManager:
         prior = self.restore()
         if prior.phase in (Phase.IDLE, Phase.FAILED, Phase.PAUSED):
             state = prior
+        elif prior.phase == Phase.RUNNING:
+            # Crash recovery: prior run was interrupted. Preserve context
+            # (retry_count, current_task, steps_in_task, provider_index)
+            # so operators can see where the previous attempt left off.
+            log.warning(
+                "mark_started: prior phase was RUNNING — recovering from "
+                "crash; preserving retry_count=%d, current_task=%r",
+                prior.retry_count,
+                prior.current_task,
+            )
+            state = prior
+            # Force a phase transition: RUNNING→RUNNING isn't valid, so
+            # downgrade to IDLE first to take the recovery path through
+            # _transition.
+            state.phase = Phase.IDLE
         else:
+            # COMPLETED: reset cleanly but log loudly.
+            log.warning(
+                "mark_started: prior phase was COMPLETED — discarding "
+                "accumulated state and starting fresh"
+            )
             state = AgentState()
         state = self._transition(state, Phase.RUNNING)
         # Clear any stale error_message left over from a previous FAILED or

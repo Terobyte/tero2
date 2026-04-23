@@ -11,6 +11,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 MAX_BUILDER_OUTPUT_CHARS = 2000
+MAX_CYCLES = 2
+
+
+class MaxReflexionCyclesExceeded(Exception):
+    pass
 
 
 @dataclass
@@ -105,6 +110,8 @@ def add_attempt(
     Returns:
         Updated ReflexionContext with the new attempt appended.
     """
+    if len(context.attempts) >= MAX_CYCLES:
+        return context  # cap at MAX_CYCLES; caller should escalate
     attempt = ReflexionAttempt(
         attempt_number=len(context.attempts) + 1,
         builder_output=builder_output,

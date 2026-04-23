@@ -159,7 +159,7 @@ class TestStuckDetectionToolRepeat:
         assert result.signal == StuckSignal.NONE
 
     def test_signal_at_threshold(self) -> None:
-        state = AgentState(tool_repeat_count=1, last_tool_hash="abc123", tool_hash_updated=True)
+        state = AgentState(tool_repeat_count=2, last_tool_hash="abc123", tool_hash_updated=True)
         result = check_stuck(state, StuckDetectionConfig(tool_repeat_threshold=2))
         assert result.signal == StuckSignal.TOOL_REPEAT
         assert result.severity == 2

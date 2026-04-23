@@ -53,20 +53,20 @@ class _ProviderRow(Widget):
 
     def compose(self):  # type: ignore[override]
         pct = int(self._fraction * 100)
-        yield Label(f"{self._provider_name}: {pct}%")
-        bar = ProgressBar(total=100, show_eta=False, show_percentage=False)
+        yield Label(f"{self._provider_name}: {pct}%", id="provider-label")
+        bar = ProgressBar(total=100, show_eta=False, show_percentage=False, id="provider-bar")
         yield bar
 
     def on_mount(self) -> None:
-        bar = self.query_one(ProgressBar)
+        bar = self.query_one("#provider-bar", ProgressBar)
         bar.advance(self._fraction * 100)
 
     def refresh_fraction(self, fraction: float) -> None:
         self._fraction = max(0.0, min(1.0, fraction))
         pct = int(self._fraction * 100)
         try:
-            self.query_one(Label).update(f"{self._provider_name}: {pct}%")
-            bar = self.query_one(ProgressBar)
+            self.query_one("#provider-label", Label).update(f"{self._provider_name}: {pct}%")
+            bar = self.query_one("#provider-bar", ProgressBar)
             bar.progress = self._fraction * 100
         except Exception:
             pass

@@ -19,6 +19,7 @@ from typing import Any
 
 from tero2.constants import PROJECT_SCAN_SKIP_DIRS as _SKIP_DIRS
 from tero2.disk_layer import DiskLayer
+from tero2.errors import ProviderError, RateLimitError
 from tero2.players.base import BasePlayer, PlayerResult
 from tero2.providers.chain import ProviderChain
 
@@ -79,6 +80,8 @@ class ScoutPlayer(BasePlayer):
                 context_map=context_map,
                 file_count=file_count,
             )
+        except (ProviderError, RateLimitError):
+            raise
         except Exception as exc:
             log.error("scout failed: %s", exc)
             return ScoutResult(success=False, error=str(exc))
@@ -94,9 +97,7 @@ class ScoutPlayer(BasePlayer):
             log.warning("persistent/PROJECT.md not found — Scout will use file tree only")
             return ""
         if not content:
-            log.warning(
-                "persistent/PROJECT.md not found — Scout will use file tree only"
-            )
+            return ""
         return content
 
     @staticmethod

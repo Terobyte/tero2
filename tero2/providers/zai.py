@@ -65,7 +65,9 @@ def _read_settings_key() -> str | None:
             or data.get("env", {}).get("ZAI_API_KEY")
             or data.get("env", {}).get("ANTHROPIC_AUTH_TOKEN")
         ) or None
-    except (FileNotFoundError, json.JSONDecodeError):
+    except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
+        # Disease 1: an undecodable settings.json must not crash provider
+        # bootstrap — treat it the same as missing/invalid JSON.
         return None
 
 
@@ -87,7 +89,9 @@ def _load_token(claude_home: str) -> str:
                 or env_vals.get("ANTHROPIC_AUTH_TOKEN")
                 or ""
             )
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            # Disease 1: token discovery must be robust to non-UTF-8
+            # settings files (operator may have copied a BOM-prefixed file).
             pass
     return ""
 

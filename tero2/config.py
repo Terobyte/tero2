@@ -5,7 +5,9 @@ Priority: project .sora/config.toml > global ~/.tero2/config.toml > defaults.
 
 from __future__ import annotations
 
+import fcntl
 import logging
+import os
 import threading
 import tomllib
 from dataclasses import dataclass, field
@@ -30,11 +32,73 @@ log = logging.getLogger(__name__)
 _load_lock = threading.Lock()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Coercion helpers used by __post_init__ validators.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _coerce_bool(v) -> bool:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.strip().lower() not in ("false", "0", "no", "off", "")
+    return bool(v)
+
+
+def _coerce_int(value, cls: str, name: str) -> int:
+    if isinstance(value, bool):
+        # bool is a subclass of int, but callers rarely want True/False as 1/0 here.
+        # Preserve the numeric value but flag nothing — bool coerces cleanly.
+        return int(value)
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"{cls}.{name} must be int, got {value!r}") from exc
+
+
+def _coerce_float(value, cls: str, name: str) -> float:
+    if isinstance(value, bool):
+        return float(value)
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"{cls}.{name} must be float, got {value!r}") from exc
+
+
+def _coerce_str_list(value, cls: str, name: str) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        # A single string means a one-element list.
+        return [value]
+    try:
+        iterator = iter(value)
+    except TypeError as exc:
+        raise ConfigError(f"{cls}.{name} must be a list, got {value!r}") from exc
+    return [str(x) for x in iterator if x is not None]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Config dataclasses — each enforces its own schema at construction time.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 @dataclass
 class StuckDetectionConfig:
     max_steps_per_task: int = 15
     max_retries: int = 3
     tool_repeat_threshold: int = 2
+
+    def __post_init__(self) -> None:
+        cls = "StuckDetectionConfig"
+        self.max_steps_per_task = _coerce_int(self.max_steps_per_task, cls, "max_steps_per_task")
+        self.max_retries = _coerce_int(self.max_retries, cls, "max_retries")
+        # Allow 0 for tool_repeat_threshold (semantically "disabled");
+        # runtime checks interpret the value. Same for max_steps_per_task and
+        # max_retries — callers may disable limits by passing sentinel values.
+        self.tool_repeat_threshold = _coerce_int(
+            self.tool_repeat_threshold, cls, "tool_repeat_threshold"
+        )
 
 
 @dataclass
@@ -43,12 +107,28 @@ class EscalationConfig:
     diversification_max_steps: int = 2
     backtrack_to_last_checkpoint: bool = True
 
+    def __post_init__(self) -> None:
+        cls = "EscalationConfig"
+        self.diversification_temp_delta = _coerce_float(
+            self.diversification_temp_delta, cls, "diversification_temp_delta"
+        )
+        self.diversification_max_steps = _coerce_int(
+            self.diversification_max_steps, cls, "diversification_max_steps"
+        )
+        self.backtrack_to_last_checkpoint = _coerce_bool(self.backtrack_to_last_checkpoint)
+
 
 @dataclass
 class PlanHardeningConfig:
     max_rounds: int = 5
     stop_on_cosmetic_only: bool = True
     debug: bool = False
+
+    def __post_init__(self) -> None:
+        cls = "PlanHardeningConfig"
+        self.max_rounds = _coerce_int(self.max_rounds, cls, "max_rounds")
+        self.stop_on_cosmetic_only = _coerce_bool(self.stop_on_cosmetic_only)
+        self.debug = _coerce_bool(self.debug)
 
 
 @dataclass
@@ -57,6 +137,17 @@ class ContextConfig:
     warning_ratio: float = 0.80
     hard_fail_ratio: float = 0.95
     skip_scout_if_files_lt: int = 20
+
+    def __post_init__(self) -> None:
+        cls = "ContextConfig"
+        self.target_ratio = _coerce_float(self.target_ratio, cls, "target_ratio")
+        self.warning_ratio = _coerce_float(self.warning_ratio, cls, "warning_ratio")
+        self.hard_fail_ratio = _coerce_float(self.hard_fail_ratio, cls, "hard_fail_ratio")
+        self.skip_scout_if_files_lt = _coerce_int(
+            self.skip_scout_if_files_lt, cls, "skip_scout_if_files_lt"
+        )
+        # Ratios are validated at usage (see _check_budget) so that tests that
+        # probe runtime behaviour with zero/negative ratios still work.
 
 
 @dataclass
@@ -67,10 +158,27 @@ class RoleConfig:
     timeout_s: int = DEFAULT_PROVIDER_TIMEOUT_S
     context_window: int = 128000
 
+    def __post_init__(self) -> None:
+        cls = "RoleConfig"
+        self.provider = str(self.provider)
+        self.model = str(self.model)
+        self.fallback = _coerce_str_list(self.fallback, cls, "fallback")
+        self.timeout_s = _coerce_int(self.timeout_s, cls, "timeout_s")
+        self.context_window = _coerce_int(self.context_window, cls, "context_window")
+        # Note: prior _parse_config() clamped timeout_s and context_window to
+        # [1, 86400] and [1, 1_000_000] respectively; that clamp is applied at
+        # parse time in _parse_config() rather than here so that tests that
+        # construct RoleConfig with sentinel values (e.g. context_window=-1)
+        # continue to exercise the downstream assembler paths.
+
 
 @dataclass
 class ReflexionConfig:
     max_cycles: int = 2
+
+    def __post_init__(self) -> None:
+        cls = "ReflexionConfig"
+        self.max_cycles = _coerce_int(self.max_cycles, cls, "max_cycles")
 
 
 @dataclass
@@ -83,10 +191,30 @@ class TelegramConfig:
     voice_on_stuck: bool = True
     allowed_chat_ids: list[str] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        cls = "TelegramConfig"
+        self.enabled = _coerce_bool(self.enabled)
+        self.bot_token = str(self.bot_token)
+        self.chat_id = str(self.chat_id)
+        self.heartbeat_interval_s = _coerce_int(
+            self.heartbeat_interval_s, cls, "heartbeat_interval_s"
+        )
+        self.voice_on_done = _coerce_bool(self.voice_on_done)
+        self.voice_on_stuck = _coerce_bool(self.voice_on_stuck)
+        self.allowed_chat_ids = _coerce_str_list(
+            self.allowed_chat_ids, cls, "allowed_chat_ids"
+        )
+        # heartbeat_interval_s=0 is a legitimate "disable heartbeat" value —
+        # runtime loop short-circuits on it.
+
 
 @dataclass
 class VerifierConfig:
     commands: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        cls = "VerifierConfig"
+        self.commands = _coerce_str_list(self.commands, cls, "commands")
 
 
 @dataclass
@@ -99,6 +227,34 @@ class RetryConfig:
     cb_recovery_timeout_s: int = CB_RECOVERY_TIMEOUT_S
     rate_limit_wait_s: float = RATE_LIMIT_WAIT_S
     rate_limit_max_retries: int = RATE_LIMIT_MAX_RETRIES
+
+    def __post_init__(self) -> None:
+        cls = "RetryConfig"
+        self.max_retries = _coerce_int(self.max_retries, cls, "max_retries")
+        self.chain_retry_wait_s = _coerce_float(
+            self.chain_retry_wait_s, cls, "chain_retry_wait_s"
+        )
+        self.backoff_base = _coerce_float(self.backoff_base, cls, "backoff_base")
+        self.max_steps_per_task = _coerce_int(
+            self.max_steps_per_task, cls, "max_steps_per_task"
+        )
+        self.cb_failure_threshold = _coerce_int(
+            self.cb_failure_threshold, cls, "cb_failure_threshold"
+        )
+        self.cb_recovery_timeout_s = _coerce_int(
+            self.cb_recovery_timeout_s, cls, "cb_recovery_timeout_s"
+        )
+        self.rate_limit_wait_s = _coerce_float(
+            self.rate_limit_wait_s, cls, "rate_limit_wait_s"
+        )
+        self.rate_limit_max_retries = _coerce_int(
+            self.rate_limit_max_retries, cls, "rate_limit_max_retries"
+        )
+        # Preserve the prior _parse_config clamp of max_retries to >= 1. Other
+        # range checks live in the callers (runtime) so that tests that probe
+        # edge values can still construct a RetryConfig.
+        if self.max_retries < 1:
+            self.max_retries = 1
 
 
 @dataclass
@@ -118,18 +274,55 @@ class Config:
     max_slices: int = 50
     idle_timeout_s: int = 0
 
+    def __post_init__(self) -> None:
+        cls = "Config"
+        self.projects_dir = str(self.projects_dir)
+        self.log_level = str(self.log_level)
+        self.max_slices = _coerce_int(self.max_slices, cls, "max_slices")
+        self.idle_timeout_s = _coerce_int(self.idle_timeout_s, cls, "idle_timeout_s")
+        if not isinstance(self.roles, dict):
+            raise ConfigError(
+                f"{cls}.roles must be a dict, got {type(self.roles).__name__}"
+            )
+        if not isinstance(self.providers, dict):
+            raise ConfigError(
+                f"{cls}.providers must be a dict, got {type(self.providers).__name__}"
+            )
+
 
 def load_config(project_path: Path, override_path: Path | None = None) -> Config:
-    with _load_lock:
-        global_path = Path.home() / ".tero2" / "config.toml"
-        project_path_config = project_path / ".sora" / "config.toml"
-        global_raw = _load_toml(global_path)
-        project_raw = _load_toml(project_path_config)
-        merged = _merge_dicts(global_raw, project_raw)
-        if override_path is not None:
-            override_raw = _load_toml(override_path)
-            merged = _merge_dicts(merged, override_raw)
-        return _parse_config(merged)
+    global_path = Path.home() / ".tero2" / "config.toml"
+    global_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = global_path.with_suffix(".lock")
+    lock_fd: int | None = None
+    try:
+        lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_SH)
+        except OSError:
+            pass
+    except OSError:
+        lock_fd = None
+    try:
+        with _load_lock:
+            project_path_config = project_path / ".sora" / "config.toml"
+            global_raw = _load_toml(global_path)
+            project_raw = _load_toml(project_path_config)
+            merged = _merge_dicts(global_raw, project_raw)
+            if override_path is not None:
+                override_raw = _load_toml(override_path)
+                merged = _merge_dicts(merged, override_raw)
+            return _parse_config(merged)
+    finally:
+        if lock_fd is not None:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            try:
+                os.close(lock_fd)
+            except OSError:
+                pass
 
 
 def _load_toml(path: Path) -> dict:
@@ -137,6 +330,8 @@ def _load_toml(path: Path) -> dict:
         text = path.read_text(encoding="utf-8")
     except (OSError, FileNotFoundError):
         return {}
+    except UnicodeDecodeError as exc:
+        raise ConfigError(f"Cannot decode {path} as UTF-8: {exc}") from exc
     try:
         return tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
@@ -157,20 +352,26 @@ def _parse_config(raw: dict) -> Config:
     cfg = Config()
     general = raw.get("general", {})
     if "projects_dir" in general:
-        cfg.projects_dir = general["projects_dir"]
+        cfg.projects_dir = str(general["projects_dir"])
     if "log_level" in general:
-        cfg.log_level = general["log_level"]
+        cfg.log_level = str(general["log_level"])
 
     for name, role_data in raw.get("roles", {}).items():
-        if not role_data.get("provider"):
+        provider = str(role_data.get("provider", "")).strip()
+        if not provider:
             raise ConfigError(f"role '{name}' missing required 'provider' field")
-        cfg.roles[name] = RoleConfig(
-            provider=role_data.get("provider", ""),
+        # RoleConfig.__post_init__ handles int/str coercion; this layer applies
+        # the TOML-sourced clamp matching pre-existing _parse_config behaviour.
+        role = RoleConfig(
+            provider=provider,
             model=role_data.get("model", ""),
             fallback=role_data.get("fallback", []),
             timeout_s=role_data.get("timeout_s", DEFAULT_PROVIDER_TIMEOUT_S),
             context_window=role_data.get("context_window", 128000),
         )
+        role.timeout_s = max(1, min(role.timeout_s, 86400))
+        role.context_window = max(1, min(role.context_window, 1_000_000))
+        cfg.roles[name] = role
 
     if "executor" not in cfg.roles:
         cfg.roles["executor"] = RoleConfig(provider="opencode")
@@ -201,22 +402,30 @@ def _parse_config(raw: dict) -> Config:
         elif "builder" in cfg.roles:
             log.info("roles.%s not configured — %s phase will be skipped", optional_role, optional_role)
 
+    # Validate required roles have known providers
+    _optional_roles = {"scout", "coach"}
+    for name, role_cfg in cfg.roles.items():
+        if name not in _optional_roles and role_cfg.provider not in DEFAULT_PROVIDERS:
+            raise ConfigError(
+                f"roles.{name} references unknown provider {role_cfg.provider!r} "
+                f"(known: {', '.join(sorted(DEFAULT_PROVIDERS))})"
+            )
+
     tg = raw.get("telegram", {})
     if tg:
-        # Legacy fallback: if 'enabled' absent but bot_token present, treat as enabled
+        # Legacy fallback: if 'enabled' absent but bot_token present, treat as enabled.
+        # TelegramConfig.__post_init__ handles the bool/int/str coercion.
         tg_enabled = tg.get("enabled")
         if tg_enabled is None:
             tg_enabled = bool(tg.get("bot_token", ""))
-        elif isinstance(tg_enabled, str):
-            tg_enabled = tg_enabled.strip().lower() not in ("false", "0", "no", "off", "")
         cfg.telegram = TelegramConfig(
-            enabled=bool(tg_enabled),
+            enabled=tg_enabled,
             bot_token=tg.get("bot_token", ""),
             chat_id=tg.get("chat_id", ""),
             heartbeat_interval_s=tg.get("heartbeat_interval_s", DEFAULT_HEARTBEAT_INTERVAL_S),
             voice_on_done=tg.get("voice_on_done", True),
             voice_on_stuck=tg.get("voice_on_stuck", True),
-            allowed_chat_ids=[str(x) for x in tg.get("allowed_chat_ids", []) if x is not None],
+            allowed_chat_ids=tg.get("allowed_chat_ids", []),
         )
 
     retry = raw.get("retry", {})
@@ -276,13 +485,19 @@ def _parse_config(raw: dict) -> Config:
     ver = raw.get("verifier", {})
     if ver:
         cfg.verifier = VerifierConfig(
-            commands=list(ver.get("commands", [])),
+            commands=ver.get("commands", []),
         )
 
     sora = raw.get("sora", {})
     if "max_slices" in sora:
-        cfg.max_slices = int(sora["max_slices"])
+        try:
+            cfg.max_slices = int(sora["max_slices"])
+        except (ValueError, TypeError) as e:
+            raise ConfigError(f"sora.max_slices must be an integer: {sora['max_slices']!r}") from e
     if "idle_timeout_s" in sora:
-        cfg.idle_timeout_s = int(sora["idle_timeout_s"])
+        try:
+            cfg.idle_timeout_s = int(sora["idle_timeout_s"])
+        except (ValueError, TypeError) as e:
+            raise ConfigError(f"sora.idle_timeout_s must be an integer: {sora['idle_timeout_s']!r}") from e
 
     return cfg

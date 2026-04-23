@@ -246,7 +246,7 @@ def cmd_harden(args: argparse.Namespace) -> None:
 
     config = load_config(project_path)
 
-    if "reviewer" not in config.roles:
+    if not config.roles or "reviewer" not in config.roles:
         print("error: [roles.reviewer] must be configured for tero2 harden")
         sys.exit(1)
 
@@ -257,7 +257,12 @@ def cmd_harden(args: argparse.Namespace) -> None:
 
     disk = DiskLayer(project_path)
     disk.init()
-    disk.write_file("milestones/M001/PLAN.md", plan_file.read_text())
+    try:
+        plan_text = plan_file.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        print(f"error: plan file {plan_file} is not valid UTF-8: {exc}")
+        sys.exit(1)
+    disk.write_file("milestones/M001/PLAN.md", plan_text)
 
     state = AgentState()
     state.plan_file = str(plan_file)

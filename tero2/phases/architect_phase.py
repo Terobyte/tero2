@@ -60,11 +60,15 @@ async def run_architect(
     )
     persona_prompt = ctx.personas.load_or_default("architect").system_prompt
 
-    result = await player.run(
-        slice_id=slice_id,
-        milestone_path=ctx.milestone_path,
-        persona_prompt=persona_prompt,
-    )
+    try:
+        result = await player.run(
+            slice_id=slice_id,
+            milestone_path=ctx.milestone_path,
+            persona_prompt=persona_prompt,
+        )
+    except Exception as exc:
+        log.error("architect: player.run() raised: %s — returning failure", exc)
+        return PhaseResult(success=False, error=str(exc))
 
     if result.success:
         log.info(

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from tero2.disk_layer import DiskLayer
+from tero2.errors import ProviderError, RateLimitError
 from tero2.players.base import BasePlayer, PlayerResult
 from tero2.providers.chain import ProviderChain
 
@@ -116,6 +117,7 @@ class VerifierPlayer(BasePlayer):
 
         cwd = self.working_dir or "."
         try:
+            using_python_fallback = not verify_commands
             if not verify_commands:
                 # Python project fallback
                 verify_commands = ["ruff check .", "pytest -x"]
@@ -133,9 +135,15 @@ class VerifierPlayer(BasePlayer):
             report = verdict + "\n" + combined
             failed_tests = _extract_list(combined, "FAILED")
 
-            # Preserve ruff/pytest fields when using default Python commands.
-            ruff_output = all_output[0] if len(all_output) > 0 else ""
-            pytest_output = all_output[1] if len(all_output) > 1 else ""
+            # Only populate ruff/pytest fields when using the default Python
+            # fallback commands. Custom commands (npm, cargo, etc.) must not
+            # be mislabeled as ruff or pytest output.
+            if using_python_fallback:
+                ruff_output = all_output[0] if len(all_output) > 0 else ""
+                pytest_output = all_output[1] if len(all_output) > 1 else ""
+            else:
+                ruff_output = ""
+                pytest_output = ""
 
             return VerifierResult(
                 success=(verdict == Verdict.PASS),
@@ -145,6 +153,8 @@ class VerifierPlayer(BasePlayer):
                 pytest_output=pytest_output,
                 failed_tests=failed_tests,
             )
+        except (ProviderError, RateLimitError):
+            raise
         except Exception as exc:
             log.error("verifier failed for %s: %s", task_id, exc)
             return VerifierResult(

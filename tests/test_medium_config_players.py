@@ -122,37 +122,19 @@ def test_a22_run_shell_catches_file_not_found_returns_anomaly_rc():
 # A21 — stuck_detection.py: update_tool_hash off-by-one in repeat counter
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_a21_update_tool_hash_stuck_fires_on_second_repeat_not_third():
-    """A21 — With threshold=2, stuck must fire on the 2nd identical call, not the 3rd.
+def test_a21_update_tool_hash_stuck_fires_at_threshold_repeats():
+    """A21 — With threshold=N, stuck must fire after exactly N repeats.
 
-    Current code (stuck_detection.py lines 84–100)::
+    Semantics (after bug 156 fix): tool_repeat_threshold counts *repeats*,
+    not total calls. The first identical call establishes the hash and
+    does NOT count as a repeat (new_count=0). Each subsequent identical
+    call increments the counter by 1.
 
-        new_count = state.tool_repeat_count + 1 if is_repeat else 0
-        # (check_stuck: fires when tool_repeat_count >= threshold)
+    Call trace with threshold=2::
 
-    Call trace with threshold=2:
-        Call 1: last_hash="", new_hash=H, is_repeat=False, new_count=0
-        Call 2: last_hash=H,  new_hash=H, is_repeat=True,  new_count=1
-        Call 3: last_hash=H,  new_hash=H, is_repeat=True,  new_count=2 → FIRES
-
-    Bug: with threshold=2, the stuck signal fires on the 3rd total call (3rd
-    identical call, 2nd repeat).  Semantically, threshold=2 should mean
-    "tolerate 1 repeat and fire on the 2nd repeat", i.e. fire when count
-    reaches 1 after the 2nd call, not when count reaches 2 after the 3rd.
-
-    The off-by-one: the counter starts at 0 on first repeat instead of 1,
-    so it takes one extra identical call to reach threshold.
-
-    This test verifies that with threshold=2 the stuck signal fires BEFORE
-    a 4th identical call is needed.  Specifically, check_stuck must return
-    TOOL_REPEAT after the 3rd call with new_count=2.  But the intent of
-    threshold=2 is to fire at the 2nd repeat (count would be 1 under a
-    correct off-by-one-free implementation).
-
-    Concretely: we assert that check_stuck fires when tool_repeat_count==2
-    and threshold==2 (current code: ok, this passes) — but we then show
-    the REAL off-by-one by asserting a 4th call IS NOT needed.  The bug
-    manifests as: calling with same hash 4 times before stuck fires.
+        Call 1: last_hash="", new_hash=H, is_repeat=False, new_count=0 → NONE
+        Call 2: last_hash=H,  new_hash=H, is_repeat=True,  new_count=1 → NONE
+        Call 3: last_hash=H,  new_hash=H, is_repeat=True,  new_count=2 → TOOL_REPEAT
     """
     from tero2.stuck_detection import (
         StuckSignal,
@@ -163,50 +145,30 @@ def test_a21_update_tool_hash_stuck_fires_on_second_repeat_not_third():
     from tero2.state import AgentState
 
     config = StuckDetectionConfig(
-        max_retries=999,           # don't fire retry signal
-        max_steps_per_task=999,    # don't fire step limit
-        tool_repeat_threshold=2,   # should fire after 2nd identical call
+        max_retries=999,
+        max_steps_per_task=999,
+        tool_repeat_threshold=2,
     )
 
-    # Build an AgentState that won't trigger retry/step signals
     state = AgentState(retry_count=0, steps_in_task=0)
     tool_call = "write_file(path='x.py', content='hello')"
 
-    # Call 1: establishes hash — no repeat yet
     state, is_repeat1 = update_tool_hash(state, tool_call)
-    assert not is_repeat1, "First call should not be a repeat"
-    result1 = check_stuck(state, config)
-    assert result1.signal == StuckSignal.NONE, (
-        f"After call 1 (no repeat), stuck must be NONE; got {result1.signal}"
+    assert not is_repeat1
+    assert check_stuck(state, config).signal == StuckSignal.NONE
+
+    state, is_repeat2 = update_tool_hash(state, tool_call)
+    assert is_repeat2
+    assert state.tool_repeat_count == 1
+    assert check_stuck(state, config).signal == StuckSignal.NONE, (
+        "After 1 repeat (count=1) with threshold=2, stuck must NOT fire."
     )
 
-    # Call 2: first repeat — count should be 1
-    state, is_repeat2 = update_tool_hash(state, tool_call)
-    assert is_repeat2, "Second identical call must be detected as repeat"
-    # With threshold=2 and count=1, check_stuck should already fire
-    # because threshold=2 intends "fire after 2 identical repeats after first"
-    result2 = check_stuck(state, config)
-
-    # Call 3: second repeat — count becomes 2, and ONLY now does stuck fire (the bug)
     state, is_repeat3 = update_tool_hash(state, tool_call)
-    assert is_repeat3, "Third identical call must be detected as repeat"
-    result3 = check_stuck(state, config)
-
-    # With the current code: result2.signal == NONE (count=1 < threshold=2)
-    # and result3.signal == TOOL_REPEAT (count=2 >= threshold=2).
-    # The bug: threshold=2 should fire at the 2nd identical call (count=1),
-    # not at the 3rd (count=2). The counter is one behind — off by one.
-    assert result2.signal == StuckSignal.TOOL_REPEAT, (
-        f"BUG: check_stuck did NOT fire TOOL_REPEAT after 2nd identical call "
-        f"(tool_repeat_count={state.tool_repeat_count - 1}, threshold=2).  "
-        f"Got signal={result2.signal!r}.  "
-        "With threshold=2 the intent is to fire after 2 identical calls once "
-        "the hash is established (calls 1+2), but the counter starts at 0 for "
-        "the first repeat (call 2) so it takes a 3rd identical call to reach "
-        "count=2 and fire.  This is an off-by-one in stuck_detection.py: "
-        "``new_count = state.tool_repeat_count + 1`` should start at 1 for the "
-        "first repeat (i.e. initialise with 1 not 0), or the threshold comparison "
-        "should use ``> threshold - 1`` / ``>= threshold - 1``."
+    assert is_repeat3
+    assert state.tool_repeat_count == 2
+    assert check_stuck(state, config).signal == StuckSignal.TOOL_REPEAT, (
+        "After 2 repeats (count=2) with threshold=2, stuck must fire."
     )
 
 

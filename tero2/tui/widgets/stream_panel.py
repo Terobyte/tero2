@@ -13,6 +13,7 @@ Method naming:
 
 from __future__ import annotations
 
+import threading
 from collections import deque
 from datetime import datetime, timezone
 
@@ -54,6 +55,7 @@ class RoleStreamPanel(RichLog):
         super().__init__(markup=False, highlight=False, wrap=True, **kwargs)
         self._buffers: dict[str, deque[StreamEvent]] = {}
         self._last_seen: dict[str, datetime] = {}
+        self._lock = threading.Lock()
 
     def push_stream_event(self, ev: StreamEvent) -> None:
         if ev.role not in self._buffers:

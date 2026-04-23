@@ -46,9 +46,20 @@ def check_stuck(state: AgentState, config: StuckDetectionConfig) -> StuckResult:
     Severity 0 = no problem, 2 = escalate now.
     """
     if state.retry_count >= config.max_retries:
+        details = f"retry_count={state.retry_count} >= max_retries={config.max_retries}"
+        if (
+            state.tool_hash_updated
+            and state.tool_repeat_count > 0
+            and config.tool_repeat_threshold > 0
+            and state.tool_repeat_count >= config.tool_repeat_threshold
+        ):
+            details += (
+                f"; also tool repeat deadlock: same tool repeated "
+                f"{state.tool_repeat_count} times"
+            )
         return StuckResult(
             signal=StuckSignal.RETRY_EXHAUSTED,
-            details=(f"retry_count={state.retry_count} >= max_retries={config.max_retries}"),
+            details=details,
             severity=2,
         )
     if state.steps_in_task >= config.max_steps_per_task:
@@ -64,7 +75,7 @@ def check_stuck(state: AgentState, config: StuckDetectionConfig) -> StuckResult:
         state.tool_hash_updated        # must have had at least one update_tool_hash call
         and state.tool_repeat_count > 0
         and config.tool_repeat_threshold > 0
-        and state.tool_repeat_count >= config.tool_repeat_threshold - 1
+        and state.tool_repeat_count >= config.tool_repeat_threshold
     ):
         return StuckResult(
             signal=StuckSignal.TOOL_REPEAT,

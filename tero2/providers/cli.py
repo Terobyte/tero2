@@ -164,6 +164,7 @@ class CLIProvider(BaseProvider):
                 try:
                     parsed = json.loads(stripped)
                 except json.JSONDecodeError:
+                    log.warning("non-json line from %s: %r", self._name, stripped)
                     yield {"type": "text", "text": stripped}
                     continue
                 if isinstance(parsed, dict):
@@ -177,7 +178,7 @@ class CLIProvider(BaseProvider):
                 # Drain stderr (A46): await first so buffered error data isn't
                 # lost; then cancel on timeout / completion.
                 try:
-                    await asyncio.wait_for(asyncio.shield(stderr_task), timeout=0.5)
+                    await asyncio.wait_for(asyncio.shield(stderr_task), timeout=5.0)
                 except Exception:
                     pass
                 stderr_task.cancel()
@@ -234,11 +235,22 @@ class CLIProvider(BaseProvider):
             env=env,
         )
 
+        # Drain stdout concurrently with stdin writes. Without this, if the
+        # child fills its stdout pipe buffer before all stdin is consumed it
+        # blocks on write — classic deadlock.
+        async def _drain_stdout_bg():
+            async for _ in proc.stdout:
+                pass
+
         if stdin_data and proc.stdin:
+            stdout_task = asyncio.create_task(_drain_stdout_bg()) if proc.stdout else None
             try:
                 proc.stdin.write(stdin_data)
                 await proc.stdin.drain()
             except BrokenPipeError as exc:
+                if stdout_task is not None:
+                    stdout_task.cancel()
+                    await asyncio.gather(stdout_task, return_exceptions=True)
                 try:
                     proc.kill()
                 except (ProcessLookupError, OSError):

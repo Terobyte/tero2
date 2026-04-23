@@ -88,7 +88,7 @@ def decide_escalation(
 
     # At Level 1 → check if diversification window is exhausted
     if current_level == EscalationLevel.DIVERSIFICATION:
-        if diversification_steps_taken >= config.diversification_max_steps:
+        if config.diversification_max_steps > 0 and diversification_steps_taken >= config.diversification_max_steps:
             # Diversification didn't help → Level 2
             return EscalationAction(
                 level=EscalationLevel.BACKTRACK_COACH,
@@ -130,6 +130,15 @@ async def execute_escalation(
 
     if action.level == EscalationLevel.DIVERSIFICATION:
         log.info("escalation Level 1: diversification — injecting new-approach prompt")
+        # Bug 189 + Bug 254: the runner is the single source of truth for
+        # div_steps (see Runner._run_agent_loop and execute_phase) — it
+        # increments ctx.div_steps and mirrors into state.div_steps.
+        # execute_escalation intentionally does NOT increment state.div_steps
+        # here, to avoid double-counting the diversification window.
+        #
+        # Bug A18: reset stuck counters so the same signal doesn't re-fire
+        # on the next step. The agent is getting a fresh-start prompt, so
+        # the prior tool-repeat chain no longer applies.
         state = dataclasses_replace(
             state,
             escalation_level=EscalationLevel.DIVERSIFICATION.value,
@@ -151,6 +160,15 @@ async def execute_escalation(
                 retry_count=0,
                 tool_repeat_count=0,
                 last_tool_hash="",
+            )
+        else:
+            # Bug 272: no backtrack — counters intentionally preserved so
+            # downstream stuck_detection keeps firing. The Level 2 marker
+            # is still written so the runner knows diversification window
+            # was exhausted, but no rollback actually happened.
+            log.warning(
+                "escalation Level 2: backtrack disabled by config — "
+                "no backtrack applied, resuming without reset"
             )
         state = dataclasses_replace(state, escalation_level=EscalationLevel.BACKTRACK_COACH.value)
         state = checkpoint.save(state)
@@ -208,7 +226,7 @@ def write_stuck_report(
         tried.append("Level 1 diversification")
     if EscalationLevel.BACKTRACK_COACH in escalation_history:
         tried.append("Level 2 backtrack")
-    tried_str = ", ".join(tried) if tried else "none"
+    tried_str = ", ".join(tried) if tried else "(unavailable)"
 
     report = (
         f"# Stuck Report — {timestamp}\n\n"
