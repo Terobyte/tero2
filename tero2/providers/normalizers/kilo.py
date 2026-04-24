@@ -122,9 +122,23 @@ class KiloNormalizer:
             )
 
         elif kind == "error":
-            msg = raw.get("text", "") or raw.get("error", "")
+            # Bug L22: Claude-shaped errors arrive as a nested dict
+            # ``{"error":{"message":"..."}}``. Previously stored the raw
+            # dict into ``StreamEvent.content`` — downstream consumers
+            # (heartbeat_sidebar, TUI) then called ``.splitlines()`` on
+            # a dict and crashed. Unwrap to the nested ``message`` /
+            # ``error`` field and coerce to ``str``.
+            msg_or_dict = raw.get("text", "") or raw.get("error", "")
+            if isinstance(msg_or_dict, dict):
+                msg = (
+                    msg_or_dict.get("message")
+                    or msg_or_dict.get("error")
+                    or "unknown error"
+                )
+            else:
+                msg = msg_or_dict
             yield StreamEvent(
-                role=role, kind="error", timestamp=ts, content=msg, raw=raw,
+                role=role, kind="error", timestamp=ts, content=str(msg), raw=raw,
             )
 
         elif kind == "turn_end":

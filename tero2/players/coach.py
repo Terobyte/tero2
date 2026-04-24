@@ -83,11 +83,12 @@ class CoachPlayer(BasePlayer):
             if context_hints:
                 self.disk.write_file("strategic/CONTEXT_HINTS.md", context_hints)
 
-            # Bug 116: clear STEER.md only when we actually folded it into a
-            # strategy document. A successful parse with zero sections means
-            # nothing was applied, so the operator's directive must survive
-            # for the next attempt.
-            wrote_any = all([strategy, task_queue, risk, context_hints])
+            # Bug 116 + L4: clear STEER.md only when we actually folded it
+            # into any strategy document. Previously used all() which
+            # required every section populated — so a partial update (e.g.
+            # STRATEGY.md alone) kept STEER around, and the operator's
+            # directive got re-applied on the next Coach pass.
+            wrote_any = any([strategy, task_queue, risk, context_hints])
             if wrote_any and self.disk.read_steer():
                 self.disk.clear_steer()
 
@@ -134,18 +135,21 @@ class CoachPlayer(BasePlayer):
                 tid = f"T{i:02d}"
                 content = self.disk.read_file(f"{milestone_path}/{sid}/{tid}-SUMMARY.md")
                 if not content:
+                    # Bug L6: one missing summary (task skipped/interrupted)
+                    # must not shadow later ones. Skip the gap instead of
+                    # breaking — T01 missing with T02..T07 present should
+                    # still produce a useful Coach prompt.
+                    continue
+                entry = f"### {sid}/{tid}\n{content}"
+                if total_size + len(entry) > _SIZE_CAP:
+                    log.warning(
+                        "coach: truncating task summaries at _SIZE_CAP, %d chars dropped",
+                        len(entry),
+                    )
+                    summaries.append("[TRUNCATED — context limit reached]")
                     break
-                if content:
-                    entry = f"### {sid}/{tid}\n{content}"
-                    if total_size + len(entry) > _SIZE_CAP:
-                        log.warning(
-                            "coach: truncating task summaries at _SIZE_CAP, %d chars dropped",
-                            len(entry),
-                        )
-                        summaries.append("[TRUNCATED — context limit reached]")
-                        break
-                    summaries.append(entry)
-                    total_size += len(entry)
+                summaries.append(entry)
+                total_size += len(entry)
 
         metrics_raw = self.disk.read_metrics()
         metrics_str = json.dumps(metrics_raw, indent=2) if metrics_raw else ""

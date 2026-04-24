@@ -33,8 +33,12 @@ _BUILTIN_ROLES = (
 
 _LOCAL_PROMPTS_DIR = Path(".sora/prompts")
 
+# Bug L11: tolerate CRLF (Windows) and CR (classic Mac) line endings in
+# prompt files. Previously only LF matched, so any editor writing CRLF
+# left the frontmatter unparsed and the raw ``---`` markers leaked into
+# the system prompt.
 _FRONTMATTER_RE = re.compile(
-    r"\A---[ \t]*\n(.*?)\n?---[ \t]*\n?(.*)",
+    r"\A---[ \t]*\r?\n(.*?)\r?\n?---[ \t]*\r?\n?(.*)",
     re.DOTALL,
 )
 
@@ -196,17 +200,24 @@ class PersonaRegistry:
             return Persona(name=role, system_prompt=body, metadata=meta)
         cached = self._resolved_cache.get(role)
         if cached is not None:
-            # Bug 231: record st_mtime for potential future invalidation/refresh.
-            # mtime is tracked in _resolved_cache_mtime for callers that need
-            # explicit invalidation (call del self._resolved_cache[role] to
-            # force a reload, or call invalidate(role)).
+            # Bug L25: previously recorded mtime but never compared it, so
+            # editing .sora/prompts/{role}.md mid-run had no effect. Check
+            # the current mtime against the cached one and reload on
+            # change; fall through to the miss path if the file changed.
             local_path = self._local_prompts_dir / f"{role}.md"
             try:
                 current_mtime = local_path.stat().st_mtime
-                self._resolved_cache_mtime[role] = current_mtime
+                cached_mtime = self._resolved_cache_mtime.get(role)
+                if cached_mtime is not None and current_mtime != cached_mtime:
+                    # File changed — invalidate and re-resolve below.
+                    del self._resolved_cache[role]
+                    self._resolved_cache_mtime.pop(role, None)
+                else:
+                    self._resolved_cache_mtime[role] = current_mtime
+                    return cached
             except OSError:
-                pass
-            return cached
+                # File disappeared — keep the in-memory cache.
+                return cached
         local_path = self._local_prompts_dir / f"{role}.md"
         try:
             raw = local_path.read_text(encoding="utf-8")

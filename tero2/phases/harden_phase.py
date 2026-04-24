@@ -183,11 +183,13 @@ def _parse_verdict(output: str) -> str:
         ``"critical"``  — ``CRITICAL`` present.
         ``"malformed"`` — none of the expected markers found.
     """
-    has_critical = bool(_CRITICAL_RE.search(output))
-    if has_critical:
-        return "critical"
+    # Bug L16: NO ISSUES FOUND must win over an incidental "CRITICAL"
+    # mention in the natural-language body (e.g. "no CRITICAL defects").
+    # An explicit negative verdict is authoritative — check it first.
     if _NO_ISSUES_RE.search(output):
         return "no_issues"
+    if _CRITICAL_RE.search(output):
+        return "critical"
     if _COSMETIC_RE.search(output):
         return "cosmetic"
     return "malformed"

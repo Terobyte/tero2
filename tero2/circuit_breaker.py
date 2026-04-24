@@ -75,11 +75,25 @@ class CircuitBreaker:
 
     @property
     def is_available(self) -> bool:
-        try:
-            self.check()
-            return True
-        except CircuitOpenError:
-            return False
+        """Side-effect-free availability probe.
+
+        Bug L12: previously delegated to ``check()`` which MUTATES state
+        (transitions OPEN→HALF_OPEN and reserves the trial slot). A
+        telemetry/UI reader of ``is_available`` would consume the only
+        HALF_OPEN probe, starving real callers that then saw a spurious
+        CircuitOpenError. Inspect state directly instead.
+        """
+        with self._lock:
+            if self.state == CBState.CLOSED:
+                return True
+            if self.state == CBState.OPEN:
+                if time.time() - self.last_failure_time < self.recovery_timeout_s:
+                    return False
+                if self.recovery_timeout_s == 0 and self.last_half_open_failure_time > 0:
+                    return False
+                return True  # recovery window elapsed, HALF_OPEN probe possible
+            # HALF_OPEN: a probe is available iff no trial is in flight.
+            return not self._trial_in_progress
 
 
 class CircuitBreakerRegistry:

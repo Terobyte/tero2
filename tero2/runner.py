@@ -739,7 +739,9 @@ class Runner:
         extra_slices_done = 0
         _slice_loop_completed = False
         limit_reached = False
+        loop_entered = False
         while extra_slices_done < max_slices - 1:
+            loop_entered = True
             state = self.checkpoint.set_sora_phase(state, SoraPhase.SLICE_DONE)
             self._current_state = state
             ctx.state = state
@@ -800,13 +802,22 @@ class Runner:
                 await self._emit_error(msg)
                 break
         else:
-            limit_reached = True
-            msg = (
-                f"extra slice limit reached ({max_slices} additional slices beyond S01) "
-                f"— stopping. Check TASK_QUEUE.md."
-            )
-            await self.notifier.notify(msg, NotifyLevel.ERROR)
-            await self._emit_error(msg)
+            # while..else fires both when the loop exhausted its budget AND
+            # when the loop condition was False from the start (Python quirk).
+            # Only treat it as a limit-reached if the loop actually iterated
+            # at least once; otherwise user ran with max_slices <= 1 by choice.
+            if loop_entered:
+                limit_reached = True
+                msg = (
+                    f"extra slice limit reached ({max_slices} additional slices beyond S01) "
+                    f"— stopping. Check TASK_QUEUE.md."
+                )
+                await self.notifier.notify(msg, NotifyLevel.ERROR)
+                await self._emit_error(msg)
+            else:
+                # Loop never ran (max_slices <= 1): S01 already succeeded,
+                # treat as a clean completion.
+                _slice_loop_completed = True
 
         if _slice_loop_completed:
             state = self.checkpoint.mark_completed(state)

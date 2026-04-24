@@ -47,6 +47,14 @@ class _ProviderRow(Widget):
     """
 
     def __init__(self, provider_name: str, fraction: float, **kwargs: object) -> None:
+        # Bug L20: Textual ids must match [A-Za-z0-9_-]+. Real provider
+        # names like "claude-3.5" contain a dot which would otherwise
+        # raise BadIdentifier from the Widget base class. Sanitise the
+        # id here so every caller — including tests that pass the raw
+        # name — gets a safe widget id.
+        if "id" in kwargs and isinstance(kwargs["id"], str):
+            import re as _re_id
+            kwargs["id"] = _re_id.sub(r"[^A-Za-z0-9_-]", "_", kwargs["id"])
         super().__init__(**kwargs)
         self._provider_name = provider_name
         self._fraction = max(0.0, min(1.0, fraction))
@@ -158,7 +166,13 @@ class UsagePanel(Widget):
             if name in self._rows:
                 self._rows[name].refresh_fraction(fraction)
             else:
-                row = _ProviderRow(name, fraction, id=f"provider-{name}")
+                # Bug L20: Textual ids must match [A-Za-z0-9_-]+. Real
+                # provider names like "claude-3.5" or "gpt-4.1" contain
+                # a dot and would raise BadIdentifier from _ProviderRow's
+                # __init__ before the mount try/except could catch it.
+                import re as _re_id
+                safe_id = _re_id.sub(r"[^A-Za-z0-9_-]", "_", name)
+                row = _ProviderRow(name, fraction, id=f"provider-{safe_id}")
                 self._rows[name] = row
                 try:
                     summary_widget = self.query_one("#usage-summary")

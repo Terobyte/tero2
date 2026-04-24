@@ -134,10 +134,20 @@ class ZaiNormalizer:
             )
 
         elif kind == "error":
-            msg = _get(raw, "error", "") or _get(raw, "text", "")
+            # Bug L22: zai mirrors the Claude nested-error shape. Unwrap
+            # so ``StreamEvent.content`` is always ``str``.
+            msg_or_dict = _get(raw, "error", "") or _get(raw, "text", "")
+            if isinstance(msg_or_dict, dict):
+                msg = (
+                    msg_or_dict.get("message")
+                    or msg_or_dict.get("error")
+                    or "unknown error"
+                )
+            else:
+                msg = msg_or_dict
             yield StreamEvent(
                 role=role, kind="error", timestamp=ts,
-                content=msg, raw=self._to_raw(raw),
+                content=str(msg), raw=self._to_raw(raw),
             )
 
         elif kind == "turn_end":

@@ -172,10 +172,19 @@ async def execute_escalation(
             )
         state = dataclasses_replace(state, escalation_level=EscalationLevel.BACKTRACK_COACH.value)
         state = checkpoint.save(state)
+        # Bug L19: the journal must accurately reflect whether a rollback
+        # actually happened. Previously logged "Resetting to last checkpoint"
+        # unconditionally — a post-mortem reader would believe the reset
+        # occurred even when config disabled backtrack.
+        reset_line = (
+            "Resetting to last checkpoint.\n"
+            if action.should_backtrack
+            else "Backtrack disabled by config — no reset applied.\n"
+        )
         disk.append_file(
             "persistent/EVENT_JOURNAL.md",
             f"\n## Stuck Event — {timestamp}\n"
-            f"Level 2 escalation triggered. Resetting to last checkpoint.\n"
+            f"Level 2 escalation triggered. {reset_line}"
             f"Signal: {sr.signal.value if sr else 'unknown'}\n"
             f"Details: {sr.details if sr else ''}\n",
         )

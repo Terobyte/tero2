@@ -65,10 +65,10 @@ class CheckpointManager:
                 prior.current_task,
             )
             state = prior
-            # Force a phase transition: RUNNING→RUNNING isn't valid, so
-            # downgrade to IDLE first to take the recovery path through
-            # _transition.
-            state.phase = Phase.IDLE
+            # Bug L9: the phase guard in AgentState.__setattr__ rejects
+            # RUNNING → IDLE. Bypass the guard to stage an intermediate
+            # state; _transition below will then legally move IDLE → RUNNING.
+            object.__setattr__(state, "phase", Phase.IDLE)
         else:
             # COMPLETED: reset cleanly but log loudly.
             log.warning(

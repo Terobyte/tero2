@@ -77,7 +77,12 @@ def _run_shell(cmd_str: str, cwd: str) -> tuple[int, str, str]:
         return -1, "", f"command timed out: {cmd_str}"
 
 
-_SHELL_OPS = re.compile(r"&&|\|\||[|;]|\bcd\b")
+# Bug L5: any of these shell meta-characters means we cannot safely pass
+# argv to subprocess.run — we must route via a shell. Previously this only
+# matched the boolean and pipe operators, so `pytest > test.log` or
+# `ls tests/test_*.py` ended up with `>` and `*` as literal argv entries,
+# silently losing redirects and glob expansion.
+_SHELL_OPS = re.compile(r"&&|\|\||[|;<>*?()`$]|\bcd\b")
 
 
 def _run_command(cmd_str: str, cwd: str) -> tuple[int, str, str]:

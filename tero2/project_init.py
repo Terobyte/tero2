@@ -83,12 +83,18 @@ def _sanitize_name(name: str) -> str:
     """Convert project name to directory-safe format.
 
     "My Cool Project" -> "my-cool-project"
+
+    Bug L18: previously returned a ``"project"`` fallback for
+    punctuation-only or hyphen-only inputs, which defeated
+    ``init_project``'s empty-name guard and silently created
+    ``{projects_dir}/project`` for garbage input. Return the empty
+    string instead so the caller can raise a clear ``ValueError``.
     """
     # Replace non-alphanumeric chars (except spaces and hyphens) with nothing
     cleaned = re.sub(r"[^\w\s-]", "", name)
     # Replace whitespace with hyphens, lowercase
     result = re.sub(r"[-\s]+", "-", cleaned).strip("-").lower()
-    return result or "project"
+    return result
 
 
 def _extract_project_name(plan: str) -> str:

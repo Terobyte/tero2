@@ -164,7 +164,10 @@ def _recover_summary_from_disk(task_id: str, working_dir: str) -> str:
     Looks for ``{task_id}-SUMMARY.md`` in the project working directory
     (where agent tool calls land) rather than in ``.sora/``.
     """
-    if working_dir is None:
+    # Bug L23: an empty/whitespace working_dir falls through to CWD,
+    # letting a stray ``T01-SUMMARY.md`` next to the runner's process
+    # get adopted as the builder summary. Treat "" the same as None.
+    if not working_dir or not working_dir.strip():
         return ""
     base = Path(working_dir)
     candidates = [

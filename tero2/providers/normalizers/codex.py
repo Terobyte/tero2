@@ -90,9 +90,21 @@ class CodexNormalizer:
         elif kind == "done":
             yield StreamEvent(role=role, kind="turn_end", timestamp=ts, raw=raw)
         elif kind == "error":
-            msg = raw.get("message") or raw.get("error") or "unknown error"
+            # Bug L7: Codex sometimes emits the Claude-shaped error
+            # ``{"type":"error","error":{"message":"..."}}`` where the
+            # nested ``error`` field is a dict. Unwrap to its ``message``
+            # so StreamEvent.content is always a string, not a dict.
+            msg_or_dict = raw.get("message") or raw.get("error") or "unknown error"
+            if isinstance(msg_or_dict, dict):
+                msg = (
+                    msg_or_dict.get("message")
+                    or msg_or_dict.get("error")
+                    or "unknown error"
+                )
+            else:
+                msg = msg_or_dict
             yield StreamEvent(
-                role=role, kind="error", timestamp=ts, content=msg, raw=raw,
+                role=role, kind="error", timestamp=ts, content=str(msg), raw=raw,
             )
         # Anything else → empty (no event)
 

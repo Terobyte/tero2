@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import logging
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -43,9 +44,20 @@ class HistoryEntry:
 def load_history() -> list[HistoryEntry]:
     try:
         raw = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
-        return [HistoryEntry(**e) for e in raw.get("entries", [])]
-    except (FileNotFoundError, json.JSONDecodeError, TypeError, OSError, UnicodeDecodeError):
+    except (FileNotFoundError, json.JSONDecodeError, OSError, UnicodeDecodeError):
         return []
+    # Bug L13: load each entry individually — one corrupt record (missing
+    # field / extra field / wrong type) previously killed the whole list
+    # comprehension and the user lost ALL project history.
+    entries: list[HistoryEntry] = []
+    for idx, e in enumerate(raw.get("entries", [])):
+        try:
+            entries.append(HistoryEntry(**e))
+        except (TypeError, ValueError) as exc:
+            logging.getLogger(__name__).warning(
+                "history entry %d malformed, skipping: %s", idx, exc
+            )
+    return entries
 
 
 def record_run(project_path: Path, plan_file: Path | None) -> None:

@@ -68,11 +68,15 @@ def _simple_toml_dumps(data: dict, prefix: str = "") -> str:
             def _item(i):
                 if isinstance(i, bool):
                     return "true" if i else "false"
-                elif isinstance(i, int):
+                if isinstance(i, int):
                     return str(i)
-                else:
-                    s = str(i).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\t", "\\t")
-                    return f'"{s}"'
+                # Bug L21: floats must round-trip as TOML floats, not as
+                # quoted strings. ``repr`` preserves precision and handles
+                # edge values sanely.
+                if isinstance(i, float):
+                    return repr(i)
+                s = str(i).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\t", "\\t")
+                return f'"{s}"'
             items = ", ".join(_item(i) for i in v)
             lines.append(f"{k} = [{items}]")
         elif v is None:

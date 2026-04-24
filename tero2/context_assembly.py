@@ -140,9 +140,20 @@ class ContextAssembler:
         mandatory_user = "\n\n".join(user_parts)
         mandatory_tokens = estimate_tokens(mandatory_user)
 
+        # A13: check mandatory_user against the budget — the user portion
+        # must fit even when we strip system prompts from the count.
         status = _check_budget(mandatory_tokens, budget, cfg)
         if status == BudgetState.HARD_FAIL:
             raise ContextWindowExceededError(mandatory_tokens, budget)
+
+        # Bug L2: also gate on system_prompt independently. A persona that
+        # alone blows past the hard-fail threshold would otherwise pass
+        # this check (user fits) and then silently emit a HARD_FAIL prompt
+        # downstream. Raise early with both token counts attributed.
+        system_tokens = estimate_tokens(system_prompt)
+        system_status = _check_budget(system_tokens, budget, cfg)
+        if system_status == BudgetState.HARD_FAIL:
+            raise ContextWindowExceededError(system_tokens + mandatory_tokens, budget)
 
         if summaries is None:
             summaries = []

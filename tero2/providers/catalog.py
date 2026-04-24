@@ -139,9 +139,12 @@ def _load_cache(cli: str) -> list[ModelEntry] | None:
         if age > _CACHE_TTL_S:
             return None
         return [ModelEntry(**e) for e in raw["entries"]]
-    except (FileNotFoundError, KeyError, json.JSONDecodeError, ValueError):
-        # Note: UnicodeDecodeError subclasses ValueError, so it's covered here.
-        # Treat undecodable cache the same as missing/corrupt — next fetch refreshes.
+    except (FileNotFoundError, KeyError, json.JSONDecodeError, ValueError, TypeError):
+        # Bug L8: TypeError covers schema evolution — if a newer tero2
+        # wrote a cache entry with extra fields (e.g. "deprecated"), this
+        # older code's ``ModelEntry(**e)`` raises TypeError. Treat that
+        # like any other corrupt/mismatched cache and force a refresh.
+        # UnicodeDecodeError subclasses ValueError.
         return None
 
 

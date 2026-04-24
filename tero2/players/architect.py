@@ -292,7 +292,12 @@ def _parse_slice_plan(
             for line in must_have_split[1].splitlines():
                 line = line.strip()
                 if line.startswith("-"):
-                    must_haves.append(line.lstrip("- ").strip())
+                    # Bug L24: ``lstrip("- ")`` is a character set, not a
+                    # prefix — it strips every leading `-` and space, so
+                    # `- --verbose` → `verbose` (both dashes gone) and
+                    # `- -t option` → `t option`. Strip exactly one bullet
+                    # marker with slicing, then trim the separating spaces.
+                    must_haves.append(line[1:].lstrip(" ").strip())
 
         task = Task(id=task_id, description=description, must_haves=must_haves)
         tasks.append(task)
@@ -327,11 +332,20 @@ def validate_plan(plan: str) -> list[str]:
                 errors.append(f"dependency references unknown task {ref}")
     parts = _TASK_SPLIT_RE.split(plan)
     # parts: [preamble, header1, body1, header2, body2, ...]
+    seen_ids: set[str] = set()
     for idx in range(1, len(parts) - 1, 2):
         header = parts[idx]
         body = parts[idx + 1] if idx + 1 < len(parts) else ""
         tid = _TASK_ID_RE.search(header)
         tid_str = tid.group(0) if tid else f"#{(idx + 1) // 2}"
+        # Bug L14: catch duplicate task IDs. Two ``## T01:`` headers
+        # would otherwise both materialise as Task(id="T01"), letting
+        # the second overwrite T01-SUMMARY.md at execute time and
+        # making crash recovery ambiguous.
+        if tid:
+            if tid_str in seen_ids:
+                errors.append(f"duplicate task id {tid_str}")
+            seen_ids.add(tid_str)
         if not _MUST_HAVE_RE.search(body):
             errors.append(f"task {tid_str} is missing must-haves")
         must_have_split = re.split(r"\*?\*?[Mm]ust.{0,3}[Hh]aves?\*?\*?:?", body, maxsplit=1, flags=re.IGNORECASE)

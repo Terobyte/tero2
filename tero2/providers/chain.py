@@ -29,6 +29,55 @@ def _is_recoverable_error(exc: BaseException) -> bool:
     )
 
 
+def _extract_text(msg: Any) -> str:
+    """Best-effort extraction of user-visible text from a provider message.
+
+    Handles four shapes (Bug L10):
+        1. plain str
+        2. flat dict with ``content`` / ``text`` key
+        3. Claude assistant envelope:
+           ``{"type":"assistant","message":{"content":[{"type":"text","text":"..."}]}}``
+        4. object with .content / .text attribute
+    """
+    if isinstance(msg, str):
+        return msg
+    if isinstance(msg, dict):
+        # Flat content/text first.
+        flat = msg.get("content") or msg.get("text")
+        if isinstance(flat, str) and flat:
+            return flat
+        # Claude assistant shape — dive into message.content[...].text.
+        inner = msg.get("message")
+        if isinstance(inner, dict):
+            inner_content = inner.get("content")
+            if isinstance(inner_content, list):
+                chunks = []
+                for part in inner_content:
+                    if isinstance(part, dict):
+                        t = part.get("text") or part.get("content")
+                        if isinstance(t, str) and t:
+                            chunks.append(t)
+                if chunks:
+                    return "".join(chunks)
+            # Flat ``message.text`` variant.
+            if isinstance(inner.get("text"), str) and inner["text"]:
+                return inner["text"]
+        # content might be a list of parts directly on msg (some kilo shapes).
+        if isinstance(msg.get("content"), list):
+            chunks = []
+            for part in msg["content"]:
+                if isinstance(part, dict):
+                    t = part.get("text") or part.get("content")
+                    if isinstance(t, str) and t:
+                        chunks.append(t)
+            if chunks:
+                return "".join(chunks)
+        return ""
+    # Arbitrary object — attribute access fallback.
+    text = getattr(msg, "content", None) or getattr(msg, "text", None)
+    return str(text) if text else ""
+
+
 # Context window sizes for known models (same table as zai.py).
 _MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     "glm": 128_000,
@@ -218,15 +267,7 @@ class ProviderChain:
         """
         parts: list[str] = []
         async for msg in self.run_prompt(prompt):
-            if isinstance(msg, str):
-                parts.append(msg)
-            elif isinstance(msg, dict):
-                content = msg.get("content", "") or msg.get("text", "")
-                if content:
-                    parts.append(str(content))
-            else:
-                # Object with .content or .text attribute
-                text = getattr(msg, "content", None) or getattr(msg, "text", None)
-                if text:
-                    parts.append(str(text))
+            text = _extract_text(msg)
+            if text:
+                parts.append(text)
         return "\n".join(parts)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -235,22 +236,37 @@ class CLIProvider(BaseProvider):
             env=env,
         )
 
-        # Drain stdout concurrently with stdin writes. Without this, if the
-        # child fills its stdout pipe buffer before all stdin is consumed it
-        # blocks on write — classic deadlock.
-        async def _drain_stdout_bg():
-            async for _ in proc.stdout:
-                pass
+        # Bug 146 + L1: we need a concurrent stdout reader so the child
+        # doesn't block on a full stdout pipe buffer while we write stdin
+        # (classic deadlock — Bug 146). But the old `_drain_stdout_bg`
+        # discarded the events it read, racing with `_stream_events` for
+        # the same data (Bug L1). Fix: the concurrent reader pushes every
+        # line into a Queue and `_stream_events` consumes from a wrapper
+        # that replaces `proc.stdout`. Capture the ORIGINAL stdout into a
+        # local before swapping to avoid the pump reading its own queue.
+        stdout_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        stdout_task: asyncio.Task | None = None
+        _original_stdout = proc.stdout
+
+        async def _stdout_pump() -> None:
+            try:
+                if _original_stdout is not None:
+                    async for line in _original_stdout:
+                        await stdout_queue.put(line)
+            finally:
+                await stdout_queue.put(None)
 
         if stdin_data and proc.stdin:
-            stdout_task = asyncio.create_task(_drain_stdout_bg()) if proc.stdout else None
+            if _original_stdout is not None:
+                stdout_task = asyncio.create_task(_stdout_pump())
             try:
                 proc.stdin.write(stdin_data)
                 await proc.stdin.drain()
             except BrokenPipeError as exc:
                 if stdout_task is not None:
                     stdout_task.cancel()
-                    await asyncio.gather(stdout_task, return_exceptions=True)
+                    with suppress(asyncio.CancelledError, Exception):
+                        await stdout_task
                 try:
                     proc.kill()
                 except (ProcessLookupError, OSError):
@@ -261,15 +277,39 @@ class CLIProvider(BaseProvider):
                     f"process exited before stdin was sent"
                 ) from exc
             finally:
-                proc.stdin.close()
-                await proc.stdin.wait_closed()
+                try:
+                    proc.stdin.close()
+                    await proc.stdin.wait_closed()
+                except (OSError, BrokenPipeError):
+                    pass
 
         if proc.stdout is None:
             raise ProviderError(f"{self._name}: subprocess stdout is None")
+
+        if stdout_task is not None:
+            class _QueueStdout:
+                def __init__(self, q: asyncio.Queue[bytes | None]) -> None:
+                    self._q = q
+
+                def __aiter__(self) -> "_QueueStdout":
+                    return self
+
+                async def __anext__(self) -> bytes:
+                    item = await self._q.get()
+                    if item is None:
+                        raise StopAsyncIteration
+                    return item
+
+            proc.stdout = _QueueStdout(stdout_queue)  # type: ignore[assignment]
+
         try:
             async for event in self._stream_events(proc):
                 yield event
         finally:
+            if stdout_task is not None and not stdout_task.done():
+                stdout_task.cancel()
+                with suppress(asyncio.CancelledError, Exception):
+                    await stdout_task
             # If the consumer broke out of iteration early (cancellation, break,
             # exception), _stream_events may not have awaited process completion.
             # Force the subprocess to exit so we don't leak a zombie.

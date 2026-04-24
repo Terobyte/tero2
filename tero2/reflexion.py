@@ -87,7 +87,11 @@ def build_reflexion_context(
                 attempt_number=a.attempt_number,
                 builder_output=output,
                 verifier_feedback=a.verifier_feedback,
-                failed_tests=a.failed_tests,
+                # Bug L15: copy the list so the new attempt owns its
+                # failed_tests — mutation on the returned context must
+                # not leak back into the caller's input (snapshot
+                # contract).
+                failed_tests=list(a.failed_tests),
             )
         )
     return ReflexionContext(attempts=truncated)
@@ -118,5 +122,7 @@ def add_attempt(
         verifier_feedback=verifier_feedback,
         failed_tests=failed_tests or [],
     )
-    context.attempts.append(attempt)
-    return context
+    # Bug L26: return a NEW ReflexionContext so snapshots captured by
+    # loggers / audits don't mutate under them. Previously appended to
+    # the caller's list, entangling any reference kept around.
+    return ReflexionContext(attempts=[*context.attempts, attempt])

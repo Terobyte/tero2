@@ -251,6 +251,12 @@ def cmd_harden(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     if args.rounds is not None:
+        # Bug L17: reject nonsense --rounds values up front. Previously
+        # --rounds 0 or -1 silently wrote the input as "hardened" PLAN.md
+        # because range(1, rounds+1) collapsed to empty.
+        if args.rounds < 1:
+            print(f"error: --rounds must be >= 1 (got {args.rounds})")
+            sys.exit(1)
         config.plan_hardening.max_rounds = args.rounds
     if args.debug:
         config.plan_hardening.debug = True
